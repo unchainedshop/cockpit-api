@@ -1,0 +1,34 @@
+{
+  "name": "@unchainedshop/cockpit-api",
+  "version": "1.0.17",
+  "description": "A package to interact with the Cockpit CMS API, including functionalities to handle GraphQL requests and various CMS content manipulations.",
+  "main": "dist/index.js",
+  "homepage": "https://unchained.shop",
+  "scripts": {
+    "build": "tsc"    
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unchainedshop/cockpit-api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/unchainedshop/cockpit-api/issues"
+  },
+  "keywords": [
+    "unchainedshop",
+    "cockpit",
+    "api"
+  ],
+  "author": "Mikael Araya",
+  "license": "ISC",
+  "dependencies": {    
+    "@unchainedshop/logger": "^2.10.5",
+    "graphql": "^16.8.2",
+    "lru-cache": "^10.2.2"
+  },
+  "types": "dist/index.d.ts",
+  "devDependencies": {   
+    "@types/node": "^20.14.2",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,29 @@
+{
+    "compilerOptions": {
+      "allowSyntheticDefaultImports": true,      
+      "lib": [
+        "ES2022"
+      ],
+      "module": "CommonJS",
+      "strict": true,
+      "esModuleInterop": true,      
+      "forceConsistentCasingInFileNames": true,
+      "outDir": "dist",
+      "rootDir": "src",
+      "resolveJsonModule": true,
+      "declaration": true,
+      "declarationMap": true,      
+      "noImplicitReturns": true,
+      "noUnusedLocals": false,
+      "preserveWatchOutput": true,
+      "skipLibCheck": true,
+      "sourceMap": true,
+      "target": "esnext",            
+      "paths": {
+        "@unchainedshop/cockpit-api": ["./dist/index.js"]
+      }
+    },
+    "include": ["./src"],
+    "exclude": ["node_modules", "**/*.spec.ts"],  
+  }
+  
