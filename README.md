@@ -1,31 +1,12 @@
-Sure! Here's a well-structured `README.md` for your `cockpit-api` package:
-
-```markdown
 # Cockpit API
 
 A package to interact with the Cockpit CMS API, including functionalities to handle GraphQL requests and various CMS content manipulations.
-
-## Table of Contents
-
-- [Installation](#installation)
-- [Usage](#usage)
-  - [Initialization](#initialization)
-  - [GraphQL Requests](#graphql-requests)
-  - [Content Operations](#content-operations)
-- [API Reference](#api-reference)
-  - [generateCmsRouteReplacements](#generatecmsroutereplacements)
-  - [FixImagePaths](#fiximagepaths)
-  - [CockpitAPI](#cockpitapi)
-  - [makeCockpitSchema](#makecockpitschema)
-- [Contributing](#contributing)
-- [License](#license)
-
 ## Installation
 
 Install the package via npm:
 
 ```sh
-npm install cockpit-api
+npm install --save @unchainedshop/cockpit-api
 ```
 
 ## Usage
@@ -35,7 +16,7 @@ npm install cockpit-api
 First, import and initialize the API:
 
 ```javascript
-import CockpitAPI from 'cockpit-api';
+import { CockpitAPI } from '@unchainedshop/cockpit-api';
 
 const cockpit = await CockpitAPI();
 ```
@@ -71,33 +52,6 @@ const contentItem = await cockpit.getContentItem({ model: 'posts', id: '123' });
 console.log(contentItem);
 ```
 
-## API Reference
-
-### generateCmsRouteReplacements
-
-Generates route replacements for CMS.
-
-```javascript
-import { generateCmsRouteReplacements } from 'cockpit-api';
-
-const replacements = await generateCmsRouteReplacements();
-console.log(replacements);
-```
-
-### FixImagePaths
-
-Transforms and fixes image paths in CMS responses.
-
-```javascript
-import { FixImagePaths } from 'cockpit-api';
-
-const replacements = await generateCmsRouteReplacements();
-const { transformResult } = FixImagePaths(replacements);
-
-const fixedResponse = transformResult(originalResponse);
-console.log(fixedResponse);
-```
-
 ### CockpitAPI
 
 Provides various methods to interact with the Cockpit CMS.
@@ -118,17 +72,6 @@ Provides various methods to interact with the Cockpit CMS.
 - `pagesRoutes(locale)`
 - `pagesSitemap()`
 - `pagesSetting(locale)`
-
-### makeCockpitSchema
-
-Creates a GraphQL schema from the Cockpit CMS API.
-
-```javascript
-import { makeCockpitSchema } from 'cockpit-api';
-
-const schema = await makeCockpitSchema();
-console.log(schema);
-```
 
 ## Contributing
 
