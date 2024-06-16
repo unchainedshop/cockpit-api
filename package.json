@@ -1,6 +1,6 @@
 {
   "name": "@unchainedshop/cockpit-api",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "A package to interact with the Cockpit CMS API, including functionalities to handle GraphQL requests and various CMS content manipulations.",
   "main": "dist/index.js",
   "homepage": "https://unchained.shop",

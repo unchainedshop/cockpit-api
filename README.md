@@ -13,7 +13,12 @@ npm install --save @unchainedshop/cockpit-api
 
 ### Initialization
 
-First, import and initialize the API:
+First, set your cockpit graphql endpoint to env
+
+```bash
+COCKPIT_GRAPHQL_ENDPOINT
+```
+then import and initialize the API:
 
 ```javascript
 import { CockpitAPI } from '@unchainedshop/cockpit-api';

@@ -1,15 +1,31 @@
 import { print } from "graphql";
 import { logger } from "./cockpit-logger.js";
 import { LRUCache } from 'lru-cache'
-
+const { COCKPIT_GRAPHQL_ENDPOINT = '' } = process.env;
 const dataCache = new LRUCache({
   max: 100,
   ttl: 10000 * 10,
   allowStale: false,
 });
 
-const { COCKPIT_GRAPHQL_ENDPOINT = '' } = process.env;
 
+
+enum ImageSizeMode {
+  Thumbnail = 'thumbnail',
+  BestFit = 'bestFit',
+  Resize = 'resize',
+  FitToWidth = 'fitToWidth',
+  FitToHeight = 'fitToHeight',
+}
+enum MimeType {
+  AUTO = 'auto',
+  GIF = 'gif',
+  JPEG = 'jpeg',
+  PNG = 'png',
+  WEBP = 'webp',
+  BMP = 'bmp'
+}
+['auto', 'gif', 'jpeg', 'png', 'webp', 'bmp']
 const cockpitURL = new URL(COCKPIT_GRAPHQL_ENDPOINT);
 
 export const getTenantIds = () => {
@@ -51,19 +67,20 @@ export const generateCmsRouteReplacements = async (tenant?: string) => {
 };
 
 export const generateCollectionAndSingletonSlugRouteMap = async (tenant?: string) => {
-  const cachedMap = dataCache.get(`SLUG_ROUTE_MAP_${tenant}`);
+  const cacheKey = `SLUG_ROUTE_MAP_${tenant}`;
+  const cachedMap = dataCache.get(cacheKey);
   if (cachedMap) return cachedMap;
+  const filterParams = {
+    fields: JSON.stringify({
+      data: { collection: 1, singleton: 1 },
+      _r: 1,
+      type: 1,
+    }),
+    filter: JSON.stringify({ 'data.collection': { $ne: null } }),
+  };
+
   const cmsPages = await fetch(
-    `${cockpitURL.origin}${tenant ? `/:${tenant}/api` : "/api"}/pages/pages?locale=default&${new URLSearchParams(
-      {
-        fields: JSON.stringify({
-          data: { collection: 1, singleton: 1 },
-          _r: 1,
-          type: 1,
-        }),
-        filter: JSON.stringify({ "data.collection": { $ne: null } }),
-      },
-    ).toString()}`,
+    `${cockpitURL.origin}${tenant ? `/:${tenant}/api` : "/api"}/pages/pages?locale=default&${new URLSearchParams(filterParams).toString()}`,
   );
   const pagesArr: any[] = (await cmsPages.json()) || [] as any;
   const pageMap = pagesArr.reduce((result, { data, _r }) => {
@@ -71,7 +88,7 @@ export const generateCollectionAndSingletonSlugRouteMap = async (tenant?: string
     if (!entityName) return result;
     return { ...result, [entityName]: _r };
   }, {});
-  dataCache.set(`SLUG_ROUTE_MAP_${tenant}`, pageMap);
+  dataCache.set(cacheKey, pageMap);
   return pageMap;
 };
 
@@ -113,15 +130,16 @@ const buildQueryString = (params: any) => {
 };
 
 const handleErrorAndLog = (e: Error) => {
-  console.error(e);
+  logger.error('Cockpit API Error', e);
   return null;
 };
 
 export const CockpitAPI = async (tenant?: string) => {
+  if (!COCKPIT_GRAPHQL_ENDPOINT) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
   const secretName = ["COCKPIT_SECRET", tenant].filter(Boolean).join("_");
   const token = process.env[secretName];
 
-  const buildUrl = (path: string, { locale = "de", queryParams = {} }) => {
+  const buildUrl = (path: string, { locale = "de", queryParams = {} } = {}) => {
     const normalizedLocale = locale === "de" ? "default" : locale;
     const url = new URL(cockpitURL);
     url.pathname = `${tenant ? `/:${tenant}/api` : "/api"}${path}`;
@@ -155,7 +173,7 @@ export const CockpitAPI = async (tenant?: string) => {
     }
 
     try {
-      logger.info(`requesting ${url}`);
+      logger.info(`Requesting ${url}`);
       const result = await fetch(url, {
         ...options,
         headers: {
@@ -171,16 +189,15 @@ export const CockpitAPI = async (tenant?: string) => {
   return {
     async graphQL(document: any, variables: any) {
       const query = print(document);
-      const cockpitEndpointUrl = new URL(COCKPIT_GRAPHQL_ENDPOINT as string);
+      const cockpitEndpointUrl = new URL(COCKPIT_GRAPHQL_ENDPOINT);
       if (tenant) {
         cockpitEndpointUrl.pathname = `/:${tenant}${cockpitEndpointUrl.pathname}`;
       }
-      const fetchResult = await fetchData(cockpitEndpointUrl, {
+      return fetchData(cockpitEndpointUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, variables }),
       });
-      return fetchResult;
     },
 
     async getContentItem(
@@ -235,24 +252,20 @@ export const CockpitAPI = async (tenant?: string) => {
     async postContentItem(model: string, item: any) {
       if (!model) throw new Error("Cockpit: Please provide a model");
       const url = buildUrl(`/content/item/${model}`, {});
-      const result = await fetchData(url, {
+      return fetchData(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: item }),
       });
-
-      return result;
     },
     async deleteContentItem(model: string, id?: string) {
       if (!model || !id)
         throw new Error("Cockpit: Please provide a model and id");
       const url = buildUrl(`/content/item/${model}/${id}`, {});
-      const result = await fetchData(url, {
+      return fetchData(url, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
       });
-
-      return result;
     },
 
     async pages(locale = "default", queryParams = {}) {
@@ -302,6 +315,28 @@ export const CockpitAPI = async (tenant?: string) => {
     },
     async pagesSetting(locale = "default") {
       const url = buildUrl("/pages/settings", { locale });
+      return fetchData(url);
+    },
+    async healthCheck() {
+      const url = buildUrl("/system/healthcheck");
+      return fetchData(url);
+    },
+    async lokalize(projectName: string, locale = "default", nested = null) {
+      if (!projectName)
+        throw new Error("GetCockpit: Please provide projectName");
+      const url = buildUrl(`/lokalize/project/${projectName}`, { locale, queryParams: { nested } });
+      return fetchData(url);
+    },
+    async assetById(assetId: string) {
+      if (!assetId)
+        throw new Error("GetCockpit: Please provide assetId");
+      const url = buildUrl(`/assets/${assetId}`);
+      return fetchData(url);
+    },
+    async imageAssetById(assetId: string, queryParams?: { m?: ImageSizeMode; w?: number; h?: number; q?: number; mime?: MimeType; re?: number; t?: string; o?: number; }) {
+      if (!assetId)
+        throw new Error("GetCockpit: Please provide assetId");
+      const url = buildUrl(`/assets/image/${assetId}`, { queryParams });
       return fetchData(url);
     },
     async getFullRouteForSlug(slug: string) {
