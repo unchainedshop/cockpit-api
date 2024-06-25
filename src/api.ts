@@ -10,14 +10,14 @@ const dataCache = new LRUCache({
 
 
 
-enum ImageSizeMode {
+export enum ImageSizeMode {
   Thumbnail = 'thumbnail',
   BestFit = 'bestFit',
   Resize = 'resize',
   FitToWidth = 'fitToWidth',
   FitToHeight = 'fitToHeight',
 }
-enum MimeType {
+export enum MimeType {
   AUTO = 'auto',
   GIF = 'gif',
   JPEG = 'jpeg',
@@ -25,7 +25,7 @@ enum MimeType {
   WEBP = 'webp',
   BMP = 'bmp'
 }
-['auto', 'gif', 'jpeg', 'png', 'webp', 'bmp']
+
 const cockpitURL = new URL(COCKPIT_GRAPHQL_ENDPOINT);
 
 export const getTenantIds = () => {
