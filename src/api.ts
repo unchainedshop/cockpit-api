@@ -103,6 +103,7 @@ export const FixImagePaths = (replacements: any, tenant?: string) => {
           // fixes asset paths
           .replace(/"path":"\//g, `"path":"${url}/storage/uploads/`)
           .replace(/src=\\"\/storage/gi, `src=\\"${url}/storage`)
+          .replace(/href=\\"\/storage/gi, `href=\\"${url}/storage`)
           .replace(pattern, (match) => replacements[match])
           // fixes image paths which already had a path including storage/uploads
           .replace(
