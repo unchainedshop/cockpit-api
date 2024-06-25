@@ -77,6 +77,19 @@ Provides various methods to interact with the Cockpit CMS.
 - `pagesRoutes(locale)`
 - `pagesSitemap()`
 - `pagesSetting(locale)`
+- `healthCheck()`
+- `lokalize(projectName,locale, nested)`
+- `assetById(assetId)`
+- `imageAssetById(assetId, queryParams)`
+- `getFullRouteForSlug(slug)`
+
+### Optional configuration 
+you can change the caching behavior by setting the envs below
+ 
+```bash
+COCKPIT_CACHE__MAX_LIMIT # number of records to store in before overwriting it
+COCKPIT_CACHE_TTL # caching period in milliseconds
+```
 
 ## Contributing
 
