@@ -1,10 +1,10 @@
 import { print } from "graphql";
 import { logger } from "./cockpit-logger.js";
 import { LRUCache } from 'lru-cache'
-const { COCKPIT_GRAPHQL_ENDPOINT = '' } = process.env;
+const { COCKPIT_GRAPHQL_ENDPOINT = '', COCKPIT_CACHE__MAX_LIMIT = '', COCKPIT_CACHE_TTL = '' } = process.env;
 const dataCache = new LRUCache({
-  max: 100,
-  ttl: 10000 * 10,
+  max: COCKPIT_CACHE__MAX_LIMIT ? parseInt(COCKPIT_CACHE__MAX_LIMIT, 10) : 100,
+  ttl: COCKPIT_CACHE_TTL ? parseInt(COCKPIT_CACHE_TTL, 10) : 100000,
   allowStale: false,
 });
 
