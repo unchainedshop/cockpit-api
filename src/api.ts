@@ -104,13 +104,11 @@ export const FixImagePaths = (replacements: any, tenant?: string) => {
           .replace(/"path":"\//g, `"path":"${url}/storage/uploads/`)
           .replace(/src=\\"\/storage/gi, `src=\\"${url}/storage`)
           .replace(/href=\\"\/storage/gi, `href=\\"${url}/storage`)
+          .replace(/src=\\"\/(\:.*\/)storage/gi, `src=\\"${url}/storage`)
+          .replace(/href=\\"\/(\:.*\/)storage/gi, `href=\\"${url}/storage`)
           .replace(pattern, (match) => replacements[match])
           // fixes image paths which already had a path including storage/uploads
-          .replace(
-            /"path":"\/storage\/uploads\/storage\/uploads\//g,
-            `"path":"/storage/uploads/`,
-          );
-
+          .replace(/\/storage\/uploads\/storage\/uploads\//g, `/storage/uploads/`)
         return JSON.parse(fixedDataString);
       } catch (e) {
         return originalResponse;
