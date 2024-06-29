@@ -172,7 +172,7 @@ export const CockpitAPI = async (tenant?: string) => {
     }
 
     try {
-      logger.info(`Requesting ${url}`);
+      logger.verbose(`Requesting ${url}`);
       const result = await fetch(url, {
         ...options,
         headers: {
