@@ -4,6 +4,9 @@
   "description": "A package to interact with the Cockpit CMS API, including functionalities to handle GraphQL requests and various CMS content manipulations.",
   "main": "dist/index.js",
   "homepage": "https://unchained.shop",
+  "publishConfig": {
+  "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "build": "tsc"    
   },
