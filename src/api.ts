@@ -102,8 +102,6 @@ export const FixImagePaths = (replacements: any, tenant?: string) => {
         const fixedDataString = rawResponseDataString
           // fixes asset paths
           .replace(/"path":"\//g, `"path":"${url}/storage/uploads/`)
-          .replace(/src=\\"\/storage/gi, `src=\\"${url}/storage`)
-          .replace(/href=\\"\/storage/gi, `href=\\"${url}/storage`)
           .replace(/src=\\"(\/\:[^:]+\/)?storage/gi, `src=\\"${cockpitURL.origin}/$1storage`)
           .replace(/href=\\"(\/\:[^:]+\/)?storage/gi, `href=\\"${cockpitURL.origin}/$1storage`)
           .replace(pattern, (match) => replacements[match])
@@ -135,8 +133,7 @@ const handleErrorAndLog = (e: Error) => {
 
 export const CockpitAPI = async (tenant?: string) => {
   if (!COCKPIT_GRAPHQL_ENDPOINT) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
-  const secretName = ["COCKPIT_SECRET", tenant].filter(Boolean).join("_");
-  const token = process.env[secretName];
+
 
   const buildUrl = (path: string, { locale = "de", queryParams = {} } = {}) => {
     const normalizedLocale = locale === "de" ? "default" : locale;
@@ -168,6 +165,8 @@ export const CockpitAPI = async (tenant?: string) => {
     const headers = options?.headers ?? {};
 
     if (useAdminAccess) {
+      const secretName = ["COCKPIT_SECRET", tenant].filter(Boolean).join("_");
+      const token = process.env[secretName];
       headers["API-Key"] = token;
     }
 
