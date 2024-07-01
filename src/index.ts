@@ -1,3 +1,3 @@
-import { CockpitAPI, getTenantIds } from "./api.js";
+import { CockpitAPI, getTenantIds, FixImagePaths } from "./api.js";
 
-export { CockpitAPI, getTenantIds }
+export { CockpitAPI, getTenantIds, FixImagePaths }
