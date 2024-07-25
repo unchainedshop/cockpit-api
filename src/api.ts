@@ -102,8 +102,8 @@ export const FixImagePaths = (replacements: any, tenant?: string) => {
         const fixedDataString = rawResponseDataString
           // fixes asset paths
           .replace(/"path":"\//g, `"path":"${url}/storage/uploads/`)
-          .replace(/src=\\"(\/\:[^:]+\/)?storage/gi, `src=\\"${cockpitURL.origin}/$1storage`)
-          .replace(/href=\\"(\/\:[^:]+\/)?storage/gi, `href=\\"${cockpitURL.origin}/$1storage`)
+          .replace(/src=\\"(\/[^"]*?)storage/gi, `src=\\"${cockpitURL.origin}$1storage`)
+          .replace(/href=\\"(\/[^"]*?)storage/gi, `href=\\"${cockpitURL.origin}$1storage`)
           .replace(pattern, (match) => replacements[match])
           // fixes image paths which already had a path including storage/uploads
           .replace(/\/storage\/uploads\/storage\/uploads\//g, `/storage/uploads/`);
