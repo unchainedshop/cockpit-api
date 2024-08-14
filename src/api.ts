@@ -8,6 +8,10 @@ const dataCache = new LRUCache({
   allowStale: false,
 });
 
+interface CockpitAPIOptions {
+  endpoint?: string;
+  apiKey?: string;
+}
 
 
 export enum ImageSizeMode {
@@ -131,8 +135,9 @@ const handleErrorAndLog = (e: Error) => {
   return null;
 };
 
-export const CockpitAPI = async (tenant?: string) => {
-  if (!COCKPIT_GRAPHQL_ENDPOINT) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
+export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOptions) => {
+  if (!COCKPIT_GRAPHQL_ENDPOINT || !cockpitOptions?.endpoint) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
+  const cockpitEndPOint = cockpitOptions.endpoint || COCKPIT_GRAPHQL_ENDPOINT;
 
 
   const buildUrl = (path: string, { locale = "de", queryParams = {} } = {}) => {
@@ -166,8 +171,8 @@ export const CockpitAPI = async (tenant?: string) => {
 
     if (useAdminAccess) {
       const secretName = ["COCKPIT_SECRET", tenant].filter(Boolean).join("_");
-      const token = process.env[secretName];
-      headers["API-Key"] = token;
+      const token = cockpitOptions?.apiKey || process.env[secretName];
+      headers["api-Key"] = token;
     }
 
     try {
@@ -187,7 +192,7 @@ export const CockpitAPI = async (tenant?: string) => {
   return {
     async graphQL(document: any, variables: any) {
       const query = print(document);
-      const cockpitEndpointUrl = new URL(COCKPIT_GRAPHQL_ENDPOINT);
+      const cockpitEndpointUrl = new URL(cockpitEndPOint);
       if (tenant) {
         cockpitEndpointUrl.pathname = `/:${tenant}${cockpitEndpointUrl.pathname}`;
       }

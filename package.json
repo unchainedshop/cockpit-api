@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "homepage": "https://unchained.shop",
   "publishConfig": {
-  "registry": "https://npm.pkg.github.com"
+  "registry": "https://registry.npmjs.org"
   },
   "scripts": {
     "build": "tsc"    
