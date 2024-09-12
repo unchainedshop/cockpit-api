@@ -136,7 +136,7 @@ const handleErrorAndLog = (e: Error) => {
 
 export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOptions) => {
   if (!process.env.COCKPIT_GRAPHQL_ENDPOINT && !cockpitOptions?.endpoint) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
-  const cockpitEndPOint = cockpitOptions.endpoint || process.env.COCKPIT_GRAPHQL_ENDPOINT;
+  const cockpitEndpoint = cockpitOptions?.endpoint || process.env.COCKPIT_GRAPHQL_ENDPOINT;
 
 
   const buildUrl = (path: string, { locale = "de", queryParams = {} } = {}) => {
@@ -191,7 +191,7 @@ export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOpt
   return {
     async graphQL(document: any, variables: any) {
       const query = print(document);
-      const cockpitEndpointUrl = new URL(cockpitEndPOint);
+      const cockpitEndpointUrl = new URL(cockpitEndpoint);
       if (tenant) {
         cockpitEndpointUrl.pathname = `/:${tenant}${cockpitEndpointUrl.pathname}`;
       }
