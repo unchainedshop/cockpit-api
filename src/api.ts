@@ -169,7 +169,7 @@ export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOpt
     const headers = options?.headers ?? {};
 
     if (useAdminAccess) {
-      const secretName = ["COCKPIT_SECRET", tenant].filter(Boolean).join("_");
+      const secretName = ["COCKPIT_SECRET", tenant].filter(Boolean).join("_").toUpperCase();
       const token = cockpitOptions?.apiKey || process.env[secretName];
       headers["api-Key"] = token;
     }
