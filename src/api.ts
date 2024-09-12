@@ -135,7 +135,7 @@ const handleErrorAndLog = (e: Error) => {
 };
 
 export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOptions) => {
-  if (!process.env.COCKPIT_GRAPHQL_ENDPOINT || !cockpitOptions?.endpoint) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
+  if (!process.env.COCKPIT_GRAPHQL_ENDPOINT && !cockpitOptions?.endpoint) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
   const cockpitEndPOint = cockpitOptions.endpoint || process.env.COCKPIT_GRAPHQL_ENDPOINT;
 
 
