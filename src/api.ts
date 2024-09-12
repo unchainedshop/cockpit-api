@@ -1,10 +1,9 @@
 import { print } from "graphql";
 import { logger } from "./cockpit-logger.js";
 import { LRUCache } from 'lru-cache'
-const { COCKPIT_GRAPHQL_ENDPOINT = '', COCKPIT_CACHE__MAX_LIMIT = '', COCKPIT_CACHE_TTL = '' } = process.env;
 const dataCache = new LRUCache({
-  max: COCKPIT_CACHE__MAX_LIMIT ? parseInt(COCKPIT_CACHE__MAX_LIMIT, 10) : 100,
-  ttl: COCKPIT_CACHE_TTL ? parseInt(COCKPIT_CACHE_TTL, 10) : 100000,
+  max: process.env.COCKPIT_CACHE__MAX_LIMIT ? parseInt(process.env.COCKPIT_CACHE__MAX_LIMIT, 10) : 100,
+  ttl: process.env.COCKPIT_CACHE_TTL ? parseInt(process.env.COCKPIT_CACHE_TTL, 10) : 100000,
   allowStale: false,
 });
 
@@ -30,7 +29,7 @@ export enum MimeType {
   BMP = 'bmp'
 }
 
-const cockpitURL = new URL(COCKPIT_GRAPHQL_ENDPOINT);
+const cockpitURL = () => new URL(process.env.COCKPIT_GRAPHQL_ENDPOINT);
 
 export const getTenantIds = () => {
   const env = { ...process.env };
@@ -55,7 +54,7 @@ export const generateCmsRouteReplacements = async (tenant?: string) => {
     fields: JSON.stringify({ _id: 1, slug: 1, _r: 1 }),
   };
   const cmsPages = await fetch(
-    `${cockpitURL.origin}${tenant ? `/:${tenant}/api` : "/api"}/pages/pages?${new URLSearchParams(
+    `${cockpitURL().origin}${tenant ? `/:${tenant}/api` : "/api"}/pages/pages?${new URLSearchParams(
       filterParams,
     ).toString()}`,
   );
@@ -84,7 +83,7 @@ export const generateCollectionAndSingletonSlugRouteMap = async (tenant?: string
   };
 
   const cmsPages = await fetch(
-    `${cockpitURL.origin}${tenant ? `/:${tenant}/api` : "/api"}/pages/pages?locale=default&${new URLSearchParams(filterParams).toString()}`,
+    `${cockpitURL().origin}${tenant ? `/:${tenant}/api` : "/api"}/pages/pages?locale=default&${new URLSearchParams(filterParams).toString()}`,
   );
   const pagesArr: any[] = (await cmsPages.json()) || [] as any;
   const pageMap = pagesArr.reduce((result, { data, _r }) => {
@@ -98,7 +97,7 @@ export const generateCollectionAndSingletonSlugRouteMap = async (tenant?: string
 
 export const FixImagePaths = (replacements: any, tenant?: string) => {
   const pattern = new RegExp(Object.keys(replacements).join("|"), "g");
-  const url = `${cockpitURL.origin}${tenant ? `/:${tenant}` : ""}`;
+  const url = `${cockpitURL().origin}${tenant ? `/:${tenant}` : ""}`;
   return {
     transformResult(originalResponse: any) {
       try {
@@ -106,8 +105,8 @@ export const FixImagePaths = (replacements: any, tenant?: string) => {
         const fixedDataString = rawResponseDataString
           // fixes asset paths
           .replace(/"path":"\//g, `"path":"${url}/storage/uploads/`)
-          .replace(/src=\\"(\/[^"]*?)storage/gi, `src=\\"${cockpitURL.origin}$1storage`)
-          .replace(/href=\\"(\/[^"]*?)storage/gi, `href=\\"${cockpitURL.origin}$1storage`)
+          .replace(/src=\\"(\/[^"]*?)storage/gi, `src=\\"${cockpitURL().origin}$1storage`)
+          .replace(/href=\\"(\/[^"]*?)storage/gi, `href=\\"${cockpitURL().origin}$1storage`)
           .replace(pattern, (match) => replacements[match])
           // fixes image paths which already had a path including storage/uploads
           .replace(/\/storage\/uploads\/storage\/uploads\//g, `/storage/uploads/`);
@@ -136,13 +135,13 @@ const handleErrorAndLog = (e: Error) => {
 };
 
 export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOptions) => {
-  if (!COCKPIT_GRAPHQL_ENDPOINT || !cockpitOptions?.endpoint) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
-  const cockpitEndPOint = cockpitOptions.endpoint || COCKPIT_GRAPHQL_ENDPOINT;
+  if (!process.env.COCKPIT_GRAPHQL_ENDPOINT || !cockpitOptions?.endpoint) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
+  const cockpitEndPOint = cockpitOptions.endpoint || process.env.COCKPIT_GRAPHQL_ENDPOINT;
 
 
   const buildUrl = (path: string, { locale = "de", queryParams = {} } = {}) => {
     const normalizedLocale = locale === "de" ? "default" : locale;
-    const url = new URL(cockpitURL);
+    const url = new URL(cockpitURL());
     url.pathname = `${tenant ? `/:${tenant}/api` : "/api"}${path}`;
     const queryString = buildQueryString({
       ...queryParams,
