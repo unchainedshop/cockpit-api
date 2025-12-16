@@ -14,7 +14,6 @@
     "noUnusedLocals": false,
     "outDir": "dist",
     "skipLibCheck": true,
-    "sourceMap": true,
     "target": "ESNext",
     "types": ["node"],
     "baseUrl": "." // This must be specified if "paths" is.

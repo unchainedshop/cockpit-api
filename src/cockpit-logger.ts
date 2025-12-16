@@ -1,9 +1,11 @@
-let logger = { // eslint-disable-line
-  log: console.log,
+import type { Logger } from "@unchainedshop/logger";
+
+let logger: Logger = { // eslint-disable-line
   info: console.log,
   error: console.error,
   warn: console.warn,
-  verbose: console.debug,
+  debug: console.debug,
+  trace: console.trace,
 };
 
 async function loadLogger() {
@@ -17,7 +19,7 @@ async function loadLogger() {
 
 loadLogger();
 
-const log = (...args: any) => logger.info(...args);
+const log = logger.info;
 
 export { logger };
 

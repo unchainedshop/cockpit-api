@@ -10,6 +10,7 @@ const dataCache = new LRUCache({
 interface CockpitAPIOptions {
   endpoint?: string;
   apiKey?: string;
+  useAdminAccess?: boolean;
 }
 
 
@@ -135,9 +136,9 @@ const handleErrorAndLog = (e: Error) => {
 };
 
 export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOptions) => {
+  const useAdminAccess = cockpitOptions?.useAdminAccess || false;
   if (!process.env.COCKPIT_GRAPHQL_ENDPOINT && !cockpitOptions?.endpoint) throw Error("COCKPIT_GRAPHQL_ENDPOINT is not set")
   const cockpitEndpoint = cockpitOptions?.endpoint || process.env.COCKPIT_GRAPHQL_ENDPOINT;
-
 
   const buildUrl = (path: string, { locale = "de", queryParams = {} } = {}) => {
     const normalizedLocale = locale === "de" ? "default" : locale;
@@ -165,7 +166,7 @@ export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOpt
     return transformResult(await result.json());
   };
 
-  const fetchData = async (url: any, { useAdminAccess, ...options }: any = {}) => {
+  const fetchData = async (url: any, options: any = {}) => {
     const headers = options?.headers ?? {};
 
     if (useAdminAccess) {
@@ -175,7 +176,7 @@ export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOpt
     }
 
     try {
-      logger.verbose(`Requesting ${url}`);
+      logger.debug(`Requesting ${url}`);
       const result = await fetch(url, {
         ...options,
         headers: {
@@ -206,7 +207,6 @@ export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOpt
       { model, id }: { model: string; id?: string },
       locale = "default",
       queryParams = {},
-      { useAdminAccess = false }: { useAdminAccess?: boolean } = {},
     ) {
       if (!model) throw new Error("Cockpit: Please provide a model");
 
@@ -214,7 +214,7 @@ export const CockpitAPI = async (tenant?: string, cockpitOptions?: CockpitAPIOpt
         locale,
         queryParams,
       });
-      return fetchData(url, { useAdminAccess });
+      return fetchData(url);
     },
 
     async getAggregateModel({ model, pipeline }: { model: string, pipeline: any[] }, locale = "default") {
