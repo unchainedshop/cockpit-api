@@ -199,8 +199,8 @@ ImageSizeMode, MimeType
 // Utilities
 getTenantIds, resolveTenantFromUrl, resolveTenantFromSubdomain,
 generateCmsRouteReplacements, generateCollectionAndSingletonSlugRouteMap,
-FixImagePaths, createImagePathTransformer, identityTransformer,
-ResponseTransformer, MethodContext,
+FixImagePaths, createImagePathTransformer, composeTransformers,
+identityTransformer, ResponseTransformer, MethodContext,
 TenantUrlResult, ResolveTenantFromUrlOptions, ResolveTenantFromSubdomainOptions
 ```
 
@@ -235,3 +235,27 @@ FetchClientOptions, FetchCacheMode, PageFetchParams
 - `preloadRoutes` option for preloading route replacements during initialization
 - `defaultLanguage` option to configure which language maps to Cockpit's "default" locale (defaults to "de")
 - Expanded tenant utilities: `resolveTenantFromUrl()`, `resolveTenantFromSubdomain()`
+
+## v2.1.3 Improvements
+
+- **Flexible meta type**: `CockpitMenuLink.meta` now accepts both array and object formats
+  - Type: `meta?: { key: string; value: string }[] | Record<string, string>`
+  - Supports both formats that Cockpit CMS may return depending on configuration
+  - No transformation applied - consumers can handle as needed
+  - Helper function example for transforming arrays to objects:
+    ```typescript
+    function transformMeta(meta?: { key: string; value: string }[] | Record<string, string>) {
+      if (!meta) return {};
+      if (Array.isArray(meta)) {
+        return meta.reduce((acc, { key, value }) => {
+          acc[key] = value;
+          return acc;
+        }, {} as Record<string, string>);
+      }
+      return meta;
+    }
+
+    // Usage
+    const metaObj = transformMeta(link.meta);
+    const layout = metaObj.layout;
+    ```

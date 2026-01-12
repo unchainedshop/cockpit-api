@@ -25,7 +25,7 @@ export interface CockpitMenuLink {
     [key: string]: unknown;
   };
   children?: CockpitMenuLink[];
-  meta?: { key: string; value: string }[];
+  meta?: { key: string; value: string }[] | Record<string, string>;
 }
 
 export interface CockpitMenu {
