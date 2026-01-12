@@ -4,6 +4,9 @@
 
 import { createLogger } from "@unchainedshop/logger";
 
-export const logger = createLogger("cockpit");
+type Logger = ReturnType<typeof createLogger>;
 
-export default logger.info;
+export const logger: Logger = createLogger("cockpit");
+
+const logInfo: Logger["info"] = logger.info;
+export default logInfo;

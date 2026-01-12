@@ -1,6 +1,6 @@
 # Cockpit API
 
-A TypeScript client for interacting with Cockpit CMS, including GraphQL requests and content management.
+A TypeScript client for interacting with Cockpit CMS, including GraphQL requests, content management, and schema stitching support.
 
 ## Installation
 
@@ -8,9 +8,19 @@ A TypeScript client for interacting with Cockpit CMS, including GraphQL requests
 npm install --save @unchainedshop/cockpit-api
 ```
 
-## Usage
+## Package Exports
 
-### Initialization
+This package provides three entry points:
+
+| Export | Description |
+|--------|-------------|
+| `@unchainedshop/cockpit-api` | Full-featured async API client with caching and response transformation |
+| `@unchainedshop/cockpit-api/schema` | GraphQL schema stitching utilities |
+| `@unchainedshop/cockpit-api/fetch` | Lightweight client for edge/RSC environments |
+
+## Quick Start
+
+### Main Client
 
 ```typescript
 import { CockpitAPI } from '@unchainedshop/cockpit-api';
@@ -23,6 +33,39 @@ const cockpit = await CockpitAPI({
 // Or using environment variables
 const cockpit = await CockpitAPI();  // Uses COCKPIT_GRAPHQL_ENDPOINT
 ```
+
+### Lightweight Fetch Client (Edge/RSC)
+
+```typescript
+import { createFetchClient } from '@unchainedshop/cockpit-api/fetch';
+
+// Synchronous initialization - no await needed
+const cockpit = createFetchClient({
+  endpoint: process.env.NEXT_PUBLIC_COCKPIT_ENDPOINT,
+  tenant: 'mytenant',
+  cache: 'force-cache',  // Uses platform caching
+});
+
+const page = await cockpit.pageByRoute('/about', { locale: 'en' });
+```
+
+### GraphQL Schema Stitching
+
+```typescript
+import { makeCockpitGraphQLSchema } from '@unchainedshop/cockpit-api/schema';
+import { stitchSchemas } from '@graphql-tools/stitch';
+
+const cockpitSchema = await makeCockpitGraphQLSchema({
+  tenantHeader: 'x-cockpit-space',
+  filterMutations: true,
+});
+
+const gatewaySchema = stitchSchemas({
+  subschemas: [{ schema: cockpitSchema }],
+});
+```
+
+## Main Client API
 
 ### GraphQL Requests
 
@@ -63,54 +106,158 @@ const posts = await cockpit.getContentItems('posts', {
   filter: { published: true }
 });
 
-// Get singleton content
-const settings = await cockpit.getSingleton('siteSettings', { locale: 'en' });
+// Get tree structure
+const tree = await cockpit.getContentTree('categories', {
+  parent: 'root-id',
+  populate: 2
+});
+
+// Aggregation pipeline
+const stats = await cockpit.getAggregateModel({
+  model: 'orders',
+  pipeline: [{ $group: { _id: '$status', count: { $sum: 1 } } }]
+});
+
+// Create content item
+const newPost = await cockpit.postContentItem('posts', { title: 'New Post' });
+
+// Delete content item
+await cockpit.deleteContentItem('posts', '123');
 ```
 
-### API Methods
+### Pages
 
-**Content:**
-- `getContentItem<T>({ model, id?, locale?, queryParams? })` - Get single content item
-- `getContentItems<T>(model, { limit?, skip?, sort?, filter?, fields?, populate?, locale? })` - List content items
-- `getContentTree<T>(model, { parent?, filter?, fields?, populate?, locale? })` - Get tree structure
-- `getAggregateModel<T>({ model, pipeline, locale? })` - Aggregation pipeline query
-- `getSingleton<T>(model, { locale?, populate? })` - Get singleton model
-- `postContentItem<T>(model, item)` - Create content item
-- `deleteContentItem<T>(model, id)` - Delete content item
+```typescript
+// List pages
+const allPages = await cockpit.pages({ locale: 'en', limit: 50 });
 
-**Pages:**
-- `pages<T>({ limit?, skip?, sort?, filter?, fields?, locale? })` - List pages
-- `pageById<T>({ page, id, locale?, populate? })` - Get page by ID
-- `pageByRoute<T>(route, { locale?, populate? })` - Get page by route
+// Get page by ID
+const page = await cockpit.pageById({ page: 'blog', id: '123', locale: 'en' });
 
-**Menus:**
-- `pagesMenus<T>({ locale?, inactive? })` - List all menus
-- `pagesMenu<T>(name, { locale?, inactive? })` - Get specific menu
+// Get page by route
+const aboutPage = await cockpit.pageByRoute('/about', { locale: 'en', populate: 2 });
+```
 
-**Routes & Sitemap:**
-- `pagesRoutes<T>(locale?)` - Get all routes
-- `pagesSitemap<T>()` - Get sitemap
-- `pagesSetting<T>(locale?)` - Get site settings
+### Menus
 
-**Search (Detektivo addon):**
-- `search<T>({ index, q?, limit?, offset? })` - Full-text search
+```typescript
+// Get all menus
+const menus = await cockpit.pagesMenus({ locale: 'en' });
 
-**Localization (Lokalize addon):**
-- `localize<T>(projectName, { locale?, nested? })` - Get translations
+// Get specific menu
+const mainMenu = await cockpit.pagesMenu('main-navigation', { locale: 'en' });
+```
 
-**Assets:**
-- `assetById<T>(assetId)` - Get asset metadata
-- `imageAssetById<T>(assetId, { m?, w?, h?, q?, mime? })` - Get transformed image
+### Routes & Sitemap
 
-**System:**
-- `graphQL<T>(document, variables?)` - Execute GraphQL query
-- `healthCheck<T>()` - Health check
-- `clearCache(pattern?)` - Clear cache
-- `getFullRouteForSlug(slug)` - Resolve slug to full route
+```typescript
+const routes = await cockpit.pagesRoutes('en');
+const sitemap = await cockpit.pagesSitemap();
+const settings = await cockpit.pagesSetting('en');
+const fullRoute = await cockpit.getFullRouteForSlug('my-slug');
+```
 
-### Configuration Options
+### Search (Detektivo addon)
 
-All options fall back to environment variables when not explicitly provided:
+```typescript
+const results = await cockpit.search({
+  index: 'products',
+  q: 'search term',
+  limit: 10,
+  offset: 0
+});
+```
+
+### Localization (Lokalize addon)
+
+```typescript
+const translations = await cockpit.localize('my-project', {
+  locale: 'en',
+  nested: true
+});
+```
+
+### Assets
+
+```typescript
+import { ImageSizeMode, MimeType } from '@unchainedshop/cockpit-api';
+
+// Get asset metadata
+const asset = await cockpit.assetById('asset-id');
+
+// Get transformed image
+const image = await cockpit.imageAssetById('asset-id', {
+  m: ImageSizeMode.BestFit,
+  w: 800,
+  h: 600,
+  q: 80,
+  mime: MimeType.WEBP
+});
+```
+
+### System
+
+```typescript
+// Health check
+const health = await cockpit.healthCheck();
+
+// Clear cache
+cockpit.clearCache();  // Clear all
+cockpit.clearCache('pages');  // Clear by pattern
+```
+
+## Lightweight Fetch Client API
+
+The fetch client is designed for edge/RSC environments with minimal overhead:
+
+```typescript
+import { createFetchClient } from '@unchainedshop/cockpit-api/fetch';
+
+const cockpit = createFetchClient({
+  endpoint: process.env.NEXT_PUBLIC_COCKPIT_ENDPOINT,
+  tenant: 'mytenant',
+  cache: 'force-cache',
+  apiKey: 'your-api-key',
+  headers: { 'X-Custom-Header': 'value' }
+});
+
+// Available methods
+const page = await cockpit.pageByRoute('/about', { locale: 'en' });
+const pages = await cockpit.pages({ locale: 'en' });
+const pageById = await cockpit.pageById('blog', '123', { locale: 'en' });
+const items = await cockpit.getContentItems('news', { locale: 'en', limit: 10 });
+const item = await cockpit.getContentItem('news', '123', { locale: 'en' });
+const custom = await cockpit.fetchRaw('/custom/endpoint', { param: 'value' });
+```
+
+## Schema Stitching API
+
+For building GraphQL gateways with Cockpit:
+
+```typescript
+import { makeCockpitGraphQLSchema, createRemoteExecutor } from '@unchainedshop/cockpit-api/schema';
+
+// Create schema for stitching
+const schema = await makeCockpitGraphQLSchema({
+  tenantHeader: 'x-cockpit-space',
+  filterMutations: true,
+  transforms: [],  // Additional GraphQL transforms
+  extractTenant: (ctx) => ctx.req?.headers['x-tenant'],
+  cockpitOptions: {
+    endpoint: 'https://cms.example.com/api/graphql',
+    apiKey: 'your-api-key',
+    useAdminAccess: true
+  }
+});
+
+// Or use the executor directly for custom implementations
+const executor = createRemoteExecutor({
+  tenantHeader: 'x-cockpit-space',
+  cockpitOptions: { endpoint: '...' }
+});
+```
+
+## Configuration Options
 
 ```typescript
 const cockpit = await CockpitAPI({
@@ -118,6 +265,8 @@ const cockpit = await CockpitAPI({
   tenant: 'mytenant',           // Optional: for multi-tenant setups
   apiKey: 'your-api-key',       // Falls back to COCKPIT_SECRET env var
   useAdminAccess: true,         // Optional: inject api-Key header
+  defaultLanguage: 'de',        // Language that maps to Cockpit's "default" locale (default: "de")
+  preloadRoutes: true,          // Optional: preload route replacements
   cache: {
     max: 100,                   // Falls back to COCKPIT_CACHE_MAX (default: 100)
     ttl: 100000,                // Falls back to COCKPIT_CACHE_TTL (default: 100000)
@@ -125,7 +274,7 @@ const cockpit = await CockpitAPI({
 });
 ```
 
-### Environment Variables
+## Environment Variables
 
 ```bash
 COCKPIT_GRAPHQL_ENDPOINT=https://your-cockpit-instance.com/api/graphql
@@ -135,28 +284,81 @@ COCKPIT_CACHE_MAX=100                      # Max cache entries (default: 100)
 COCKPIT_CACHE_TTL=100000                   # Cache TTL in ms (default: 100000)
 ```
 
-### TypeScript Support
+## Multi-Tenant Support
+
+```typescript
+// Tenant-specific client
+const cockpit = await CockpitAPI({
+  endpoint: 'https://cms.example.com/api/graphql',
+  tenant: 'mytenant',  // Requests use /:mytenant/api/... path
+});
+
+// Resolve tenant from URL
+import { resolveTenantFromUrl, getTenantIds } from '@unchainedshop/cockpit-api';
+
+const { tenant, slug } = resolveTenantFromUrl('https://mytenant.example.com/page');
+const allTenants = getTenantIds();  // From COCKPIT_SECRET_* env vars
+```
+
+## TypeScript Support
 
 ```typescript
 import type {
+  // Client
   CockpitAPIClient,
   CockpitAPIOptions,
+  CacheManager,
+  CacheOptions,
+
+  // Query Options
   ContentItemQueryOptions,
   ContentListQueryOptions,
+  TreeQueryOptions,
+  PageQueryOptions,
+  SearchQueryOptions,
   ImageAssetQueryParams,
+
+  // Response Types
   CockpitPage,
   CockpitAsset,
+  CockpitMenu,
+  CockpitRoute,
+  CockpitSearchResult,
+  CockpitContentItem,
+
+  // Schema Types
+  MakeCockpitSchemaOptions,
+  CockpitExecutorContext,
+
+  // Fetch Types
+  FetchClientOptions,
+  FetchCacheMode,
 } from '@unchainedshop/cockpit-api';
 
 import { ImageSizeMode, MimeType } from '@unchainedshop/cockpit-api';
 ```
 
-## v2.0.0 Breaking Changes
+## Breaking Changes
+
+### v2.0.0
 
 - `lokalize()` renamed to `localize()`
 - Methods use options objects instead of positional parameters
 - HTTP errors now throw instead of returning `null` (404 still returns `null`)
 - Each client instance has its own cache (no shared state)
+
+### v2.1.0 (New Features)
+
+- `/schema` subpackage for GraphQL schema stitching
+- `/fetch` subpackage for lightweight edge/RSC environments
+- `preloadRoutes` option for preloading route replacements
+- `defaultLanguage` option to configure which language maps to Cockpit's "default" locale
+- Expanded tenant utilities: `resolveTenantFromUrl()`, `resolveTenantFromSubdomain()`
+
+## Peer Dependencies
+
+- `graphql` (optional) - Required for the `graphQL()` method
+- `@graphql-tools/wrap` (optional) - Required for the `/schema` subpackage
 
 ## Contributing
 

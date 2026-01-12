@@ -60,7 +60,10 @@ export interface RouteMethods {
   getFullRouteForSlug(slug: string): Promise<string | undefined>;
 }
 
-export function createRouteMethods(ctx: MethodContext, tenant?: string): RouteMethods {
+export function createRouteMethods(
+  ctx: MethodContext,
+  tenant?: string,
+): RouteMethods {
   return {
     async pagesRoutes<T = unknown>(locale = "default"): Promise<T | null> {
       const url = ctx.url.build("/pages/routes", { locale });
@@ -81,7 +84,7 @@ export function createRouteMethods(ctx: MethodContext, tenant?: string): RouteMe
       const routeSlugMap = await generateCollectionAndSingletonSlugRouteMap(
         ctx.endpoint,
         tenant,
-        ctx.cache
+        ctx.cache,
       );
       return routeSlugMap[slug];
     },

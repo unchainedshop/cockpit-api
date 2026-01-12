@@ -11,12 +11,21 @@ import type { UrlBuilder } from "../core/url-builder.ts";
 // ============================================================================
 
 export interface GraphQLMethods {
-  graphQL<T = unknown>(document: DocumentNode, variables?: Record<string, unknown>): Promise<T | null>;
+  graphQL<T = unknown>(
+    document: DocumentNode,
+    variables?: Record<string, unknown>,
+  ): Promise<T | null>;
 }
 
-export function createGraphQLMethods(ctx: MethodContext, urlBuilder: UrlBuilder): GraphQLMethods {
+export function createGraphQLMethods(
+  ctx: MethodContext,
+  urlBuilder: UrlBuilder,
+): GraphQLMethods {
   return {
-    async graphQL<T = unknown>(document: DocumentNode, variables?: Record<string, unknown>): Promise<T | null> {
+    async graphQL<T = unknown>(
+      document: DocumentNode,
+      variables?: Record<string, unknown>,
+    ): Promise<T | null> {
       const query = print(document);
       const endpoint = urlBuilder.graphqlEndpoint();
       return ctx.http.post<T>(endpoint, { query, variables });

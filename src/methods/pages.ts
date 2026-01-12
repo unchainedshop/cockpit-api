@@ -62,19 +62,33 @@ export interface CockpitPage extends CockpitPageMeta {
 // ============================================================================
 
 const requireParam = (value: unknown, name: string): void => {
-  if (!value) throw new Error(`Cockpit: Please provide ${name}`);
+  if (value === undefined || value === null || value === "")
+    throw new Error(`Cockpit: Please provide ${name}`);
 };
 
 export interface PagesMethods {
   pages<T = unknown>(options?: ContentListQueryOptions): Promise<T | null>;
   pageById<T = unknown>(options: PageQueryOptions): Promise<T | null>;
-  pageByRoute<T = unknown>(route: string, options?: PageByRouteOptions | string): Promise<T | null>;
+  pageByRoute<T = unknown>(
+    route: string,
+    options?: PageByRouteOptions | string,
+  ): Promise<T | null>;
 }
 
 export function createPagesMethods(ctx: MethodContext): PagesMethods {
   return {
-    async pages<T = unknown>(options: ContentListQueryOptions = {}): Promise<T | null> {
-      const { locale = "default", limit, skip, sort, filter, fields, queryParams = {} } = options;
+    async pages<T = unknown>(
+      options: ContentListQueryOptions = {},
+    ): Promise<T | null> {
+      const {
+        locale = "default",
+        limit,
+        skip,
+        sort,
+        filter,
+        fields,
+        queryParams = {},
+      } = options;
       const url = ctx.url.build("/pages/pages", {
         locale,
         queryParams: { ...queryParams, limit, skip, sort, filter, fields },
@@ -83,7 +97,13 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
     },
 
     async pageById<T = unknown>(options: PageQueryOptions): Promise<T | null> {
-      const { page, id, locale = "default", populate, queryParams = {} } = options;
+      const {
+        page,
+        id,
+        locale = "default",
+        populate,
+        queryParams = {},
+      } = options;
       requireParam(page, "a page");
       requireParam(id, "a page and id");
       const url = ctx.url.build(`/pages/page/${page}/${id}`, {
@@ -93,10 +113,16 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
       return ctx.http.fetch<T>(url);
     },
 
-    async pageByRoute<T = unknown>(route: string, options: PageByRouteOptions | string = "default"): Promise<T | null> {
+    async pageByRoute<T = unknown>(
+      route: string,
+      options: PageByRouteOptions | string = "default",
+    ): Promise<T | null> {
       const opts = typeof options === "string" ? { locale: options } : options;
       const { locale = "default", populate } = opts;
-      const url = ctx.url.build("/pages/page", { locale, queryParams: { route, populate } });
+      const url = ctx.url.build("/pages/page", {
+        locale,
+        queryParams: { route, populate },
+      });
       return ctx.http.fetch<T>(url);
     },
   };

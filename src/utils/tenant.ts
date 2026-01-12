@@ -46,7 +46,7 @@ export const getTenantIds = (): string[] => {
     (key) =>
       key.includes("COCKPIT_SECRET") &&
       key !== "COCKPIT_SECRET" &&
-      !key.endsWith("_FILE")
+      !key.endsWith("_FILE"),
   );
 
   return cockpitSecretKeys.map((key) => {
@@ -60,9 +60,9 @@ export const getTenantIds = (): string[] => {
  */
 export const resolveApiKey = (
   tenant?: string,
-  options?: CockpitAPIOptions
+  options?: CockpitAPIOptions,
 ): string | undefined => {
-  if (options?.apiKey) return options.apiKey;
+  if (options?.apiKey !== undefined) return options.apiKey;
   const secretName = ["COCKPIT_SECRET", tenant]
     .filter(Boolean)
     .join("_")
@@ -90,15 +90,15 @@ export const resolveApiKey = (
  */
 export function resolveTenantFromSubdomain(
   subdomain: string | undefined,
-  options: ResolveTenantFromSubdomainOptions = {}
+  options: ResolveTenantFromSubdomainOptions = {},
 ): string | null {
-  if (!subdomain) return null;
+  if (subdomain === undefined) return null;
 
   const { defaultHost } = options;
   const normalizedSubdomain = subdomain.toLowerCase();
 
   // Skip if it matches the default host
-  if (defaultHost && normalizedSubdomain === defaultHost.toLowerCase()) {
+  if (normalizedSubdomain === defaultHost?.toLowerCase()) {
     return null;
   }
 
@@ -127,18 +127,20 @@ export function resolveTenantFromSubdomain(
  */
 export function resolveTenantFromUrl(
   url: string,
-  options: ResolveTenantFromUrlOptions = {}
+  options: ResolveTenantFromUrlOptions = {},
 ): TenantUrlResult {
   const parsedUrl = new URL(url);
   const hostname = parsedUrl.hostname;
 
   // Extract slug from pathname (last segment)
   const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
-  const slug = pathSegments.length > 0 ? pathSegments[pathSegments.length - 1] : null;
+  const lastSegment = pathSegments[pathSegments.length - 1];
+  const slug = lastSegment ?? null;
 
   // Extract subdomain (first part of hostname)
   const hostnameParts = hostname.split(".");
-  const subdomain = hostnameParts[0]?.toLowerCase();
+  const firstPart = hostnameParts[0];
+  const subdomain = firstPart?.toLowerCase();
 
   // Resolve tenant from subdomain
   const tenant = resolveTenantFromSubdomain(subdomain, options);

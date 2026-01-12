@@ -128,6 +128,19 @@ describe('FixImagePaths', () => {
       const result = transformer.transformResult(input);
       assert.strictEqual(result.text, 'Link to /page1 and /page2');
     });
+
+    it('keeps original link when replacement value is undefined', () => {
+      const replacements: Record<string, string> = {
+        'pages://id1': '/page1',
+        'pages://id2': undefined as unknown as string,
+      };
+      const transformer = FixImagePaths(TEST_ENDPOINT, replacements);
+      const input = { link1: 'pages://id1', link2: 'pages://id2' };
+      const result = transformer.transformResult(input);
+      assert.strictEqual(result.link1, '/page1');
+      // Undefined replacement falls back to original match
+      assert.strictEqual(result.link2, 'pages://id2');
+    });
   });
 
   describe('with tenant', () => {

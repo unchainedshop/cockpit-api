@@ -3,8 +3,10 @@
  */
 
 import type { GraphQLSchema } from "graphql";
-import type { MakeCockpitSchemaOptions } from "./types.ts";
-import { createRemoteExecutor } from "./executor.ts";
+import {
+  createRemoteExecutor,
+  type MakeCockpitSchemaOptions,
+} from "./executor.ts";
 
 /**
  * Interface for the @graphql-tools/wrap module (for type safety without requiring the dep)
@@ -17,7 +19,7 @@ interface GraphQLToolsWrapModule {
     transforms?: unknown[];
   }) => GraphQLSchema;
   FilterRootFields: new (
-    filter: (operationName: string, fieldName: string) => boolean
+    filter: (operationName: string, fieldName: string) => boolean,
   ) => unknown;
 }
 
@@ -58,17 +60,18 @@ interface GraphQLToolsWrapModule {
  * @throws Error if @graphql-tools/wrap is not installed
  */
 export async function makeCockpitGraphQLSchema(
-  options: MakeCockpitSchemaOptions = {}
+  options: MakeCockpitSchemaOptions = {},
 ): Promise<GraphQLSchema> {
   // Dynamic import to handle optional peer dependency
   let wrapModule: GraphQLToolsWrapModule;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    wrapModule = await import("@graphql-tools/wrap" as string) as GraphQLToolsWrapModule;
+    wrapModule = (await import(
+      "@graphql-tools/wrap" as string
+    )) as GraphQLToolsWrapModule;
   } catch {
     throw new Error(
       "Cockpit: @graphql-tools/wrap is required for schema stitching. " +
-        "Install it with: npm install @graphql-tools/wrap"
+        "Install it with: npm install @graphql-tools/wrap",
     );
   }
 
@@ -83,7 +86,9 @@ export async function makeCockpitGraphQLSchema(
   // Add mutation filter if enabled (default)
   if (filterMutations) {
     allTransforms.push(
-      new FilterRootFields((operationName: string) => operationName !== "Mutation")
+      new FilterRootFields(
+        (operationName: string) => operationName !== "Mutation",
+      ),
     );
   }
 

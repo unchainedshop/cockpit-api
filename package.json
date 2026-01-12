@@ -24,6 +24,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
     "test": "node --experimental-transform-types --test --experimental-test-coverage --test-coverage-exclude='src/index.ts' --test-coverage-exclude='src/**/*.test.ts' --test-coverage-exclude='src/__tests__/*' src/*.test.ts src/**/*.test.ts",
     "test:watch": "node --experimental-transform-types --test --watch src/*.test.ts src/**/*.test.ts"
   },
@@ -43,20 +45,30 @@
   "license": "ISC",
   "dependencies": {
     "@unchainedshop/logger": "^4.6.0",
-    "graphql": "^16.12.0",
     "lru-cache": "^11.2.4"
   },
   "types": "dist/index.d.ts",
   "peerDependencies": {
-    "@graphql-tools/wrap": "^8.0.0 || ^9.0.0 || ^10.0.0"
+    "@graphql-tools/wrap": "11.1.4",
+    "graphql": "^15.0.0 || ^16.0.0"
   },
   "peerDependenciesMeta": {
+    "graphql": {
+      "optional": true
+    },
     "@graphql-tools/wrap": {
       "optional": true
     }
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/node": "^24.10.7",
-    "typescript": "^5.9.3"
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "graphql": "^16.12.0",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.52.0"
   }
 }

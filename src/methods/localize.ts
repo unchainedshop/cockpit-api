@@ -18,19 +18,29 @@ export interface LocalizeOptions {
 // ============================================================================
 
 const requireParam = (value: unknown, name: string): void => {
-  if (!value) throw new Error(`Cockpit: Please provide ${name}`);
+  if (value === undefined || value === null || value === "")
+    throw new Error(`Cockpit: Please provide ${name}`);
 };
 
 export interface LocalizeMethods {
-  localize<T = unknown>(projectName: string, options?: LocalizeOptions): Promise<T | null>;
+  localize<T = unknown>(
+    projectName: string,
+    options?: LocalizeOptions,
+  ): Promise<T | null>;
 }
 
 export function createLocalizeMethods(ctx: MethodContext): LocalizeMethods {
   return {
-    async localize<T = unknown>(projectName: string, options: LocalizeOptions = {}): Promise<T | null> {
+    async localize<T = unknown>(
+      projectName: string,
+      options: LocalizeOptions = {},
+    ): Promise<T | null> {
       requireParam(projectName, "projectName");
       const { locale = "default", nested = false } = options;
-      const url = ctx.url.build(`/lokalize/project/${projectName}`, { locale, queryParams: { nested } });
+      const url = ctx.url.build(`/lokalize/project/${projectName}`, {
+        locale,
+        queryParams: { nested },
+      });
       return ctx.http.fetch<T>(url);
     },
   };

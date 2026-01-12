@@ -9,14 +9,104 @@
  * - Minimal memory footprint
  */
 
-import type { FetchClientOptions, PageFetchParams } from "./types.ts";
+// ============================================================================
+// Types
+// ============================================================================
 
 /**
- * Normalize locale to Cockpit format ("de" -> "default")
+ * Request cache mode for fetch requests
  */
-function normalizeLocale(locale?: string): string {
-  if (!locale || locale === "de") return "default";
-  return locale;
+export type FetchCacheMode =
+  | "default"
+  | "force-cache"
+  | "no-cache"
+  | "no-store"
+  | "only-if-cached"
+  | "reload";
+
+/**
+ * Options for creating a lightweight fetch client
+ */
+export interface FetchClientOptions {
+  /** Cockpit CMS endpoint URL */
+  endpoint?: string;
+  /** Tenant ID for multi-tenant setups */
+  tenant?: string | null;
+  /**
+   * Default language that maps to Cockpit's "default" locale.
+   * When a request uses this language, it will be sent as "default" to Cockpit.
+   * @default "de"
+   */
+  defaultLanguage?: string;
+  /** Request cache mode (default: "no-store") */
+  cache?: FetchCacheMode;
+  /** Additional request headers */
+  headers?: Record<string, string>;
+  /** API key for authenticated requests */
+  apiKey?: string;
+}
+
+/**
+ * Query parameters for page/content requests
+ */
+export interface PageFetchParams {
+  /** Locale for the request (the configured defaultLanguage maps to "default") */
+  locale?: string;
+  /** Populate depth for linked content */
+  populate?: number;
+  /** Additional query parameters */
+  [key: string]: string | number | boolean | undefined;
+}
+
+/**
+ * Lightweight fetch client interface
+ */
+export interface FetchClient {
+  /** Fetch a page by route */
+  pageByRoute<T = unknown>(
+    route: string,
+    params?: PageFetchParams,
+  ): Promise<T | null>;
+  /** Fetch pages list */
+  pages<T = unknown>(params?: PageFetchParams): Promise<T | null>;
+  /** Fetch a page by ID */
+  pageById<T = unknown>(
+    page: string,
+    id: string,
+    params?: PageFetchParams,
+  ): Promise<T | null>;
+  /** Fetch content items */
+  getContentItems<T = unknown>(
+    model: string,
+    params?: PageFetchParams,
+  ): Promise<T | null>;
+  /** Fetch a single content item */
+  getContentItem<T = unknown>(
+    model: string,
+    id?: string,
+    params?: PageFetchParams,
+  ): Promise<T | null>;
+  /** Raw fetch for custom paths */
+  fetchRaw<T = unknown>(
+    path: string,
+    params?: Record<string, string | number | boolean | undefined>,
+  ): Promise<T>;
+}
+
+// ============================================================================
+// Implementation
+// ============================================================================
+
+/**
+ * Creates a locale normalizer for the given default language
+ */
+function createLocaleNormalizer(
+  defaultLanguage: string,
+): (locale?: string) => string {
+  return (locale?: string): string => {
+    if (locale === undefined || locale === defaultLanguage) return "default";
+    return locale;
+  };
 }
 
 /**
@@ -24,14 +114,17 @@ function normalizeLocale(locale?: string): string {
  */
 function buildApiBaseUrl(endpoint: string, tenant?: string | null): string {
   const url = new URL(endpoint);
-  const basePath = tenant ? `/:${tenant}/api` : "/api";
+  const basePath =
+    tenant !== undefined && tenant !== null ? `/:${tenant}/api` : "/api";
   return `${url.origin}${basePath}`;
 }
 
 /**
  * Build query string from params object, filtering undefined values
  */
-function buildQueryString(params: Record<string, string | number | boolean | undefined>): string {
+function buildQueryString(
+  params: Record<string, string | number | boolean | undefined>,
+): string {
   const filtered: [string, string][] = Object.entries(params)
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => [key, String(value)]);
@@ -57,25 +150,30 @@ function buildQueryString(params: Record<string, string | number | boolean | und
  * const items = await cockpit.getContentItems("news", { locale: "de", limit: 10 });
  * ```
  */
-export function createFetchClient(options: FetchClientOptions = {}) {
+export function createFetchClient(
+  options: FetchClientOptions = {},
+): FetchClient {
   const {
-    endpoint = process.env.COCKPIT_GRAPHQL_ENDPOINT ?? process.env.NEXT_PUBLIC_COCKPIT_ENDPOINT,
+    endpoint = process.env["COCKPIT_GRAPHQL_ENDPOINT"] ??
+      process.env["NEXT_PUBLIC_COCKPIT_ENDPOINT"],
     tenant = null,
+    defaultLanguage = "de",
     cache = "no-store",
     headers = {},
     apiKey,
   } = options;
 
-  if (!endpoint) {
+  if (endpoint === undefined || endpoint === "") {
     throw new Error(
-      "Cockpit: endpoint is required (provide via options or COCKPIT_GRAPHQL_ENDPOINT env var)"
+      "Cockpit: endpoint is required (provide via options or COCKPIT_GRAPHQL_ENDPOINT env var)",
     );
   }
 
   const baseUrl = buildApiBaseUrl(endpoint, tenant);
+  const normalizeLocale = createLocaleNormalizer(defaultLanguage);
 
   const requestHeaders: Record<string, string> = { ...headers };
-  if (apiKey) {
+  if (apiKey !== undefined) {
     requestHeaders["api-Key"] = apiKey;
   }
 
@@ -84,21 +182,26 @@ export function createFetchClient(options: FetchClientOptions = {}) {
    */
   async function fetchRaw<T = unknown>(
     path: string,
-    params: Record<string, string | number | boolean | undefined> = {}
+    params: Record<string, string | number | boolean | undefined> = {},
   ): Promise<T> {
     const queryString = buildQueryString(params);
-    const url = queryString ? `${baseUrl}${path}?${queryString}` : `${baseUrl}${path}`;
+    const url = queryString
+      ? `${baseUrl}${path}?${queryString}`
+      : `${baseUrl}${path}`;
 
-    const response = await fetch(url, {
-      cache,
-      headers: Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined,
-    });
+    const fetchInit: RequestInit = { cache };
+    if (Object.keys(requestHeaders).length > 0) {
+      fetchInit.headers = requestHeaders;
+    }
+    const response = await fetch(url, fetchInit);
 
     if (!response.ok) {
       if (response.status === 404) {
         return null as T;
       }
-      throw new Error(`Cockpit: Error fetching ${url} (${response.status})`);
+      throw new Error(
+        `Cockpit: Error fetching ${url} (${String(response.status)})`,
+      );
     }
 
     return response.json() as Promise<T>;
@@ -108,7 +211,10 @@ export function createFetchClient(options: FetchClientOptions = {}) {
     /**
      * Fetch a page by route
      */
-    async pageByRoute<T = unknown>(route: string, params: PageFetchParams = {}): Promise<T | null> {
+    async pageByRoute<T = unknown>(
+      route: string,
+      params: PageFetchParams = {},
+    ): Promise<T | null> {
       const { locale, populate, ...rest } = params;
       return fetchRaw<T>("/pages/page", {
         route,
@@ -135,7 +241,7 @@ export function createFetchClient(options: FetchClientOptions = {}) {
     async pageById<T = unknown>(
       page: string,
       id: string,
-      params: PageFetchParams = {}
+      params: PageFetchParams = {},
     ): Promise<T | null> {
       const { locale, populate, ...rest } = params;
       return fetchRaw<T>(`/pages/page/${page}/${id}`, {
@@ -150,7 +256,7 @@ export function createFetchClient(options: FetchClientOptions = {}) {
      */
     async getContentItems<T = unknown>(
       model: string,
-      params: PageFetchParams = {}
+      params: PageFetchParams = {},
     ): Promise<T | null> {
       const { locale, ...rest } = params;
       return fetchRaw<T>(`/content/items/${model}`, {
@@ -165,10 +271,13 @@ export function createFetchClient(options: FetchClientOptions = {}) {
     async getContentItem<T = unknown>(
       model: string,
       id?: string,
-      params: PageFetchParams = {}
+      params: PageFetchParams = {},
     ): Promise<T | null> {
       const { locale, ...rest } = params;
-      const path = id ? `/content/item/${model}/${id}` : `/content/item/${model}`;
+      const path =
+        id !== undefined
+          ? `/content/item/${model}/${id}`
+          : `/content/item/${model}`;
       return fetchRaw<T>(path, {
         locale: normalizeLocale(locale),
         ...rest,
@@ -178,11 +287,6 @@ export function createFetchClient(options: FetchClientOptions = {}) {
     /**
      * Raw fetch for custom paths
      */
-    fetchRaw,
+    fetchRaw: fetchRaw,
   };
 }
-
-/**
- * Type for the fetch client instance
- */
-export type FetchClient = ReturnType<typeof createFetchClient>;

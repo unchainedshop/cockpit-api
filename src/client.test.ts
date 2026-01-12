@@ -36,6 +36,20 @@ describe('CockpitAPI', () => {
       assert.ok(client);
     });
 
+    it('throws on invalid tenant format (path traversal)', async () => {
+      await assertThrows(
+        () => CockpitAPI({ endpoint: TEST_ENDPOINT, tenant: '../admin' }),
+        'Invalid tenant format'
+      );
+    });
+
+    it('throws on invalid tenant format (special chars)', async () => {
+      await assertThrows(
+        () => CockpitAPI({ endpoint: TEST_ENDPOINT, tenant: 'tenant/bad' }),
+        'Invalid tenant format'
+      );
+    });
+
     it('falls back to COCKPIT_GRAPHQL_ENDPOINT env var', async () => {
       envManager.set({ COCKPIT_GRAPHQL_ENDPOINT: TEST_ENDPOINT });
       const client = await CockpitAPI();
@@ -159,6 +173,24 @@ describe('CockpitAPI', () => {
       const [url] = mockFetch.mock.calls[0].arguments;
       assert.ok(url.toString().includes('locale=en'));
     });
+
+    it('throws on invalid model format', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      await assertThrows(
+        () => client.getContentItem({ model: 'posts/../admin' }),
+        'Invalid model format'
+      );
+    });
+
+    it('throws on invalid id format', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      await assertThrows(
+        () => client.getContentItem({ model: 'posts', id: '123/../../etc' }),
+        'Invalid id format'
+      );
+    });
   });
 
   describe('getContentItems', () => {
@@ -236,7 +268,7 @@ describe('CockpitAPI', () => {
 
       await assertThrows(
         () => client.deleteContentItem('posts', ''),
-        'Please provide a model'
+        'Please provide an id'
       );
     });
 
@@ -417,6 +449,57 @@ describe('CockpitAPI', () => {
       const [, options] = mockFetch.mock.calls[0].arguments;
       assert.strictEqual(options.headers['api-Key'], 'tenantsecret');
     });
+
+    it('per-request useAdminAccess=true injects api-Key header when factory-level is false', async () => {
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        useAdminAccess: false,
+        apiKey: 'mysecret123',
+      });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: {} }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      // Request WITHOUT useAdminAccess - should NOT have api-Key
+      await client.getContentItem({ model: 'posts' });
+      const [, optionsNoAdmin] = mockFetch.mock.calls[0].arguments;
+      assert.strictEqual(optionsNoAdmin.headers['api-Key'], undefined);
+
+      // Request WITH useAdminAccess - should have api-Key
+      await client.getContentItem({ model: 'posts', useAdminAccess: true });
+      const [, optionsWithAdmin] = mockFetch.mock.calls[1].arguments;
+      assert.strictEqual(optionsWithAdmin.headers['api-Key'], 'mysecret123');
+    });
+
+    it('per-request useAdminAccess=false overrides factory-level useAdminAccess=true', async () => {
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        useAdminAccess: true,
+        apiKey: 'mysecret123',
+      });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: {} }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      // Request with explicit useAdminAccess=false - should NOT have api-Key
+      await client.getContentItem({ model: 'posts', useAdminAccess: false });
+      const [, options] = mockFetch.mock.calls[0].arguments;
+      assert.strictEqual(options.headers['api-Key'], undefined);
+    });
+
+    it('per-request useAdminAccess works with getContentItems', async () => {
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        apiKey: 'mysecret123',
+      });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.getContentItems('posts', { useAdminAccess: true });
+      const [, options] = mockFetch.mock.calls[0].arguments;
+      assert.strictEqual(options.headers['api-Key'], 'mysecret123');
+    });
   });
 
   describe('clearCache', () => {
@@ -447,41 +530,6 @@ describe('Extended API methods', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
     mock.reset();
-  });
-
-  describe('getSingleton', () => {
-    it('throws when model not provided', async () => {
-      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
-
-      await assertThrows(
-        () => client.getSingleton(''),
-        'Please provide a model'
-      );
-    });
-
-    it('constructs correct URL for singleton', async () => {
-      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
-
-      mockFetch = mock.fn(async () => createMockResponse({ body: { title: 'Test' } }));
-      globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-      await client.getSingleton('settings');
-
-      const [url] = mockFetch.mock.calls[0].arguments;
-      assert.ok(url.toString().includes('/content/item/settings'));
-    });
-
-    it('passes populate option', async () => {
-      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
-
-      mockFetch = mock.fn(async () => createMockResponse({ body: {} }));
-      globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-      await client.getSingleton('settings', { populate: 2 });
-
-      const [url] = mockFetch.mock.calls[0].arguments;
-      assert.ok(url.toString().includes('populate=2'));
-    });
   });
 
   describe('search', () => {
@@ -836,6 +884,36 @@ describe('Extended API methods', () => {
         cache: { max: 200, ttl: 30000 },
       });
       assert.ok(client); // Client created successfully with direct cache options
+    });
+  });
+
+  describe('preloadRoutes option', () => {
+    it('preloads route replacements when preloadRoutes is true', async () => {
+      const mockResponse = [
+        { _id: 'page1', _r: '/about', slug: 'about' },
+        { _id: 'page2', _r: '/contact', slug: 'contact' },
+      ];
+      mockFetch = mock.fn(async () => createMockResponse({ body: mockResponse }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, preloadRoutes: true });
+      assert.ok(client);
+
+      // Should have made a fetch call for route replacements during init
+      assert.ok(mockFetch.mock.calls.length >= 1);
+      const [url] = mockFetch.mock.calls[0].arguments;
+      assert.ok(url.toString().includes('/pages/pages'));
+    });
+
+    it('skips route preloading when preloadRoutes is false (default)', async () => {
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, preloadRoutes: false });
+      assert.ok(client);
+
+      // Should NOT have made any fetch calls during init
+      assert.strictEqual(mockFetch.mock.calls.length, 0);
     });
   });
 });

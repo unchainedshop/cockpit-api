@@ -17,6 +17,12 @@ export interface CockpitAPIOptions {
   apiKey?: string;
   /** Use admin access with API key */
   useAdminAccess?: boolean;
+  /**
+   * Default language that maps to Cockpit's "default" locale.
+   * When a request uses this language, it will be sent as "default" to Cockpit.
+   * @default "de"
+   */
+  defaultLanguage?: string;
   /** Cache configuration */
   cache?: {
     /** Max entries (falls back to COCKPIT_CACHE_MAX env var, default: 100) */
@@ -24,6 +30,13 @@ export interface CockpitAPIOptions {
     /** TTL in ms (falls back to COCKPIT_CACHE_TTL env var, default: 100000) */
     ttl?: number;
   };
+  /**
+   * Preload route replacements during client initialization.
+   * When true, fetches page routes to enable `pages://id` link resolution in responses.
+   * When false (default), skips the network request for faster cold starts.
+   * @default false
+   */
+  preloadRoutes?: boolean;
 }
 
 export interface CockpitConfig {
@@ -31,26 +44,52 @@ export interface CockpitConfig {
   readonly tenant?: string;
   readonly apiKey?: string;
   readonly useAdminAccess: boolean;
+  readonly defaultLanguage: string;
   readonly cachePrefix: string;
 }
+
+/** Valid tenant format: alphanumeric, hyphens, underscores only */
+const VALID_TENANT_PATTERN = /^[a-z0-9_-]+$/i;
 
 /**
  * Creates an immutable configuration object for the Cockpit API client
  */
 export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
-  const endpointStr = options.endpoint ?? process.env.COCKPIT_GRAPHQL_ENDPOINT;
-  if (!endpointStr) {
+  const endpointStr =
+    options.endpoint ?? process.env["COCKPIT_GRAPHQL_ENDPOINT"];
+  if (endpointStr === undefined || endpointStr === "") {
     throw new Error(
-      "Cockpit: endpoint is required (provide via options or COCKPIT_GRAPHQL_ENDPOINT env var)"
+      "Cockpit: endpoint is required (provide via options or COCKPIT_GRAPHQL_ENDPOINT env var)",
     );
   }
+
+  // Validate tenant format to prevent path traversal
+  if (
+    options.tenant !== undefined &&
+    !VALID_TENANT_PATTERN.test(options.tenant)
+  ) {
+    throw new Error(
+      "Cockpit: Invalid tenant format (only alphanumeric, hyphens, and underscores allowed)",
+    );
+  }
+
   const endpoint = new URL(endpointStr);
 
-  return Object.freeze({
+  const config: CockpitConfig = {
     endpoint,
-    tenant: options.tenant,
-    apiKey: resolveApiKey(options.tenant, options),
     useAdminAccess: options.useAdminAccess ?? false,
-    cachePrefix: `${endpointStr}:${options.tenant || "default"}:`,
-  });
+    defaultLanguage: options.defaultLanguage ?? "de",
+    cachePrefix: `${endpointStr}:${options.tenant ?? "default"}:`,
+  };
+
+  if (options.tenant !== undefined) {
+    (config as { tenant: string }).tenant = options.tenant;
+  }
+
+  const apiKey = resolveApiKey(options.tenant, options);
+  if (apiKey !== undefined) {
+    (config as { apiKey: string }).apiKey = apiKey;
+  }
+
+  return Object.freeze(config);
 }

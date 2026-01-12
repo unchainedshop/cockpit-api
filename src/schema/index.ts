@@ -24,10 +24,10 @@
  */
 
 export { makeCockpitGraphQLSchema } from "./schema-builder.ts";
-export { createRemoteExecutor } from "./executor.ts";
-export type {
-  MakeCockpitSchemaOptions,
-  CockpitExecutorContext,
-  ExecutorRequest,
-  RemoteExecutor,
-} from "./types.ts";
+export {
+  createRemoteExecutor,
+  type MakeCockpitSchemaOptions,
+  type CockpitExecutorContext,
+  type ExecutorRequest,
+  type RemoteExecutor,
+} from "./executor.ts";

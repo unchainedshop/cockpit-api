@@ -27,7 +27,12 @@ export {
 } from "./utils/route-map.ts";
 
 // Transformers (for advanced use cases)
-export { FixImagePaths, createImagePathTransformer, identityTransformer } from "./transformers/image-path.ts";
+export {
+  // eslint-disable-next-line @typescript-eslint/no-deprecated
+  FixImagePaths,
+  createImagePathTransformer,
+  identityTransformer,
+} from "./transformers/image-path.ts";
 export type { ResponseTransformer } from "./transformers/image-path.ts";
 
 // Content types
@@ -59,7 +64,12 @@ export type {
 } from "./methods/pages.ts";
 
 // Menu types
-export type { MenuQueryOptions, CockpitMenuUrl, CockpitMenuLink, CockpitMenu } from "./methods/menus.ts";
+export type {
+  MenuQueryOptions,
+  CockpitMenuUrl,
+  CockpitMenuLink,
+  CockpitMenu,
+} from "./methods/menus.ts";
 
 // Route types
 export type {
@@ -71,7 +81,11 @@ export type {
 } from "./methods/routes.ts";
 
 // Search types
-export type { SearchQueryOptions, CockpitSearchHit, CockpitSearchResult } from "./methods/search.ts";
+export type {
+  SearchQueryOptions,
+  CockpitSearchHit,
+  CockpitSearchResult,
+} from "./methods/search.ts";
 
 // Localize types
 export type { LocalizeOptions } from "./methods/localize.ts";

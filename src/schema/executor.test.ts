@@ -167,4 +167,47 @@ describe("createRemoteExecutor", () => {
     assert.ok(url.toString().includes(":fromextractor"));
     assert.ok(!url.toString().includes(":fromheader"));
   });
+
+  it("reuses cached client for same tenant", async () => {
+    const executor = createRemoteExecutor();
+    const context = { req: { headers: { "x-cockpit-space": "cachedtenant" } } };
+
+    // First call creates the client
+    await executor({ document: mockDocument, context });
+    const firstCallCount = mockFetch.mock.calls.length;
+
+    // Second call should reuse the cached client
+    await executor({ document: mockDocument, context });
+    const secondCallCount = mockFetch.mock.calls.length;
+
+    // Second call should only add 1 fetch (for GraphQL), not create new client
+    assert.strictEqual(secondCallCount - firstCallCount, 1);
+  });
+
+  it("handles concurrent requests for same tenant", async () => {
+    const executor = createRemoteExecutor();
+    const context = { req: { headers: { "x-cockpit-space": "concurrent" } } };
+
+    // Make two concurrent requests
+    const [result1, result2] = await Promise.all([
+      executor({ document: mockDocument, context }),
+      executor({ document: mockDocument, context }),
+    ]);
+
+    // Both should succeed
+    assert.ok(result1);
+    assert.ok(result2);
+  });
+
+  it("uses custom maxClients option", async () => {
+    const executor = createRemoteExecutor({ maxClients: 2 });
+
+    // Create clients for 3 different tenants
+    await executor({ document: mockDocument, context: { req: { headers: { "x-cockpit-space": "t1" } } } });
+    await executor({ document: mockDocument, context: { req: { headers: { "x-cockpit-space": "t2" } } } });
+    await executor({ document: mockDocument, context: { req: { headers: { "x-cockpit-space": "t3" } } } });
+
+    // Should not throw, LRU eviction handles overflow
+    assert.ok(true);
+  });
 });

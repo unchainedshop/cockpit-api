@@ -17,5 +17,9 @@
  */
 
 export { createFetchClient } from "./client.ts";
-export type { FetchClient } from "./client.ts";
-export type { FetchClientOptions, FetchCacheMode, PageFetchParams } from "./types.ts";
+export type {
+  FetchClient,
+  FetchClientOptions,
+  FetchCacheMode,
+  PageFetchParams,
+} from "./client.ts";

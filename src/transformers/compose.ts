@@ -15,7 +15,7 @@ export function composeTransformers(
     transform<T>(response: T): T {
       return transformers.reduce(
         (result, transformer) => transformer.transform(result),
-        response
+        response,
       );
     },
   };

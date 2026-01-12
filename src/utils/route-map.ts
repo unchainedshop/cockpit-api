@@ -5,18 +5,33 @@
 import { logger } from "../cockpit-logger.ts";
 import type { CacheManager } from "../core/cache.ts";
 
+interface PageRouteItem {
+  _id: string;
+  _r: string;
+  slug?: string;
+}
+
+interface PageDataItem {
+  data?: {
+    collection?: string;
+    singleton?: string;
+  };
+  _r: string;
+  type?: string;
+}
+
 /**
  * Generate route replacements for page links (pages://id -> actual route)
  */
 export async function generateCmsRouteReplacements(
   endpoint: string,
   tenant?: string,
-  cache?: CacheManager
+  cache?: CacheManager,
 ): Promise<Record<string, string>> {
-  const cacheKey = `ROUTE_REPLACEMENT_MAP`;
+  const cacheKey = `ROUTE_REPLACEMENT_MAP:${tenant ?? "default"}`;
 
   if (cache) {
-    const cached = cache.get<Record<string, string>>(cacheKey);
+    const cached = cache.get(cacheKey) as Record<string, string> | undefined;
     if (cached) return cached;
   }
 
@@ -26,26 +41,31 @@ export async function generateCmsRouteReplacements(
 
   try {
     const origin = new URL(endpoint).origin;
-    const apiPath = tenant ? `/:${tenant}/api` : "/api";
+    const apiPath = tenant !== undefined ? `/:${tenant}/api` : "/api";
     const response = await fetch(
-      `${origin}${apiPath}/pages/pages?${new URLSearchParams(filterParams).toString()}`
+      `${origin}${apiPath}/pages/pages?${new URLSearchParams(filterParams).toString()}`,
     );
 
     if (!response.ok) {
       logger.warn(
-        `Cockpit: Failed to fetch route replacements (status ${response.status})`
+        `Cockpit: Failed to fetch route replacements (status ${String(response.status)})`,
       );
       return {};
     }
 
-    const pagesResponse = await response.json();
-    const pagesArr = Array.isArray(pagesResponse) ? pagesResponse : [];
+    const pagesResponse: unknown = await response.json();
+    const pagesArr = (
+      Array.isArray(pagesResponse) ? pagesResponse : []
+    ) as PageRouteItem[];
 
-    const replacement = pagesArr.reduce<Record<string, string>>((result, item) => {
-      const key = `pages://${item._id}`;
-      const value = item._r;
-      return { ...result, [key]: value };
-    }, {});
+    const replacement = pagesArr.reduce<Record<string, string>>(
+      (result, item) => {
+        const key = `pages://${item._id}`;
+        const value = item._r;
+        return { ...result, [key]: value };
+      },
+      {},
+    );
 
     if (cache) {
       cache.set(cacheKey, replacement);
@@ -64,12 +84,12 @@ export async function generateCmsRouteReplacements(
 export async function generateCollectionAndSingletonSlugRouteMap(
   endpoint: string,
   tenant?: string,
-  cache?: CacheManager
+  cache?: CacheManager,
 ): Promise<Record<string, string>> {
-  const cacheKey = `SLUG_ROUTE_MAP`;
+  const cacheKey = `SLUG_ROUTE_MAP:${tenant ?? "default"}`;
 
   if (cache) {
-    const cached = cache.get<Record<string, string>>(cacheKey);
+    const cached = cache.get(cacheKey) as Record<string, string> | undefined;
     if (cached) return cached;
   }
 
@@ -84,28 +104,30 @@ export async function generateCollectionAndSingletonSlugRouteMap(
 
   try {
     const origin = new URL(endpoint).origin;
-    const apiPath = tenant ? `/:${tenant}/api` : "/api";
+    const apiPath = tenant !== undefined ? `/:${tenant}/api` : "/api";
     const response = await fetch(
-      `${origin}${apiPath}/pages/pages?locale=default&${new URLSearchParams(filterParams).toString()}`
+      `${origin}${apiPath}/pages/pages?locale=default&${new URLSearchParams(filterParams).toString()}`,
     );
 
     if (!response.ok) {
       logger.warn(
-        `Cockpit: Failed to fetch slug route map (status ${response.status})`
+        `Cockpit: Failed to fetch slug route map (status ${String(response.status)})`,
       );
       return {};
     }
 
-    const pagesResponse = await response.json();
-    const pagesArr = Array.isArray(pagesResponse) ? pagesResponse : [];
+    const pagesResponse: unknown = await response.json();
+    const pagesArr = (
+      Array.isArray(pagesResponse) ? pagesResponse : []
+    ) as PageDataItem[];
 
     const pageMap = pagesArr.reduce<Record<string, string>>(
       (result, { data, _r }) => {
-        const entityName = data?.collection || data?.singleton;
-        if (!entityName) return result;
+        const entityName = data?.collection ?? data?.singleton;
+        if (entityName === undefined) return result;
         return { ...result, [entityName]: _r };
       },
-      {}
+      {},
     );
 
     if (cache) {

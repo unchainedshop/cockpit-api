@@ -1,4 +1,10 @@
 src
 .github
+.claude
 tsconfig.json
 .nvmrc
+CLAUDE.md
+eslint.config.js
+dist/**/*.test.js
+dist/**/*.test.d.ts
+dist/__tests__

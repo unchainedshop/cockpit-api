@@ -25,7 +25,10 @@ export interface SystemMethods {
   clearCache(pattern?: string): void;
 }
 
-export function createSystemMethods(ctx: MethodContext, cache: CacheManager): SystemMethods {
+export function createSystemMethods(
+  ctx: MethodContext,
+  cache: CacheManager,
+): SystemMethods {
   return {
     async healthCheck<T = unknown>(): Promise<T | null> {
       const url = ctx.url.build("/system/healthcheck");

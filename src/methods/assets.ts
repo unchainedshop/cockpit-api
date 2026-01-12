@@ -63,12 +63,16 @@ export interface ImageAssetQueryParams {
 // ============================================================================
 
 const requireParam = (value: unknown, name: string): void => {
-  if (!value) throw new Error(`Cockpit: Please provide ${name}`);
+  if (value === undefined || value === null || value === "")
+    throw new Error(`Cockpit: Please provide ${name}`);
 };
 
 export interface AssetMethods {
   assetById<T = unknown>(assetId: string): Promise<T | null>;
-  imageAssetById<T = unknown>(assetId: string, queryParams?: ImageAssetQueryParams): Promise<T | null>;
+  imageAssetById<T = unknown>(
+    assetId: string,
+    queryParams?: ImageAssetQueryParams,
+  ): Promise<T | null>;
 }
 
 export function createAssetMethods(ctx: MethodContext): AssetMethods {
@@ -79,7 +83,10 @@ export function createAssetMethods(ctx: MethodContext): AssetMethods {
       return ctx.http.fetch<T>(url);
     },
 
-    async imageAssetById<T = unknown>(assetId: string, queryParams?: ImageAssetQueryParams): Promise<T | null> {
+    async imageAssetById<T = unknown>(
+      assetId: string,
+      queryParams?: ImageAssetQueryParams,
+    ): Promise<T | null> {
       requireParam(assetId, "assetId");
       const url = ctx.url.build(`/assets/image/${assetId}`, {
         queryParams: queryParams as Record<string, unknown>,

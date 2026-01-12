@@ -12,8 +12,8 @@ export interface CacheOptions {
 }
 
 export interface CacheManager {
-  get<T>(key: string): T | undefined;
-  set<T>(key: string, value: T): void;
+  get(key: string): unknown;
+  set(key: string, value: NonNullable<unknown>): void;
   clear(pattern?: string): void;
 }
 
@@ -23,27 +23,27 @@ export interface CacheManager {
  */
 export function createCacheManager(
   cachePrefix: string,
-  options: CacheOptions = {}
+  options: CacheOptions = {},
 ): CacheManager {
-  const cache = new LRUCache<string, unknown>({
+  const cache = new LRUCache<string, NonNullable<unknown>>({
     max: options.max ?? 100,
     ttl: options.ttl ?? 100000,
     allowStale: false,
   });
 
-  const prefixedKey = (key: string) => `${cachePrefix}${key}`;
+  const prefixedKey = (key: string): string => `${cachePrefix}${key}`;
 
   return {
-    get<T>(key: string): T | undefined {
-      return cache.get(prefixedKey(key)) as T | undefined;
+    get(key: string): unknown {
+      return cache.get(prefixedKey(key));
     },
 
-    set<T>(key: string, value: T): void {
+    set(key: string, value: NonNullable<unknown>): void {
       cache.set(prefixedKey(key), value);
     },
 
     clear(pattern?: string): void {
-      if (pattern) {
+      if (pattern !== undefined) {
         const prefix = `${cachePrefix}${pattern}`;
         for (const key of cache.keys()) {
           if (key.startsWith(prefix)) {

@@ -18,13 +18,23 @@ import {
   type TreeQueryOptions,
   type AggregateQueryOptions,
 } from "./methods/content.ts";
-import { createPagesMethods, type PageQueryOptions, type PageByRouteOptions } from "./methods/pages.ts";
+import { createPagesMethods, type PageQueryOptions } from "./methods/pages.ts";
 import { createMenuMethods, type MenuQueryOptions } from "./methods/menus.ts";
 import { createRouteMethods } from "./methods/routes.ts";
-import { createAssetMethods, type ImageAssetQueryParams } from "./methods/assets.ts";
+import {
+  createAssetMethods,
+  type ImageAssetQueryParams,
+} from "./methods/assets.ts";
 import { createGraphQLMethods } from "./methods/graphql.ts";
-import { createSearchMethods, type SearchQueryOptions, type CockpitSearchResult } from "./methods/search.ts";
-import { createLocalizeMethods, type LocalizeOptions } from "./methods/localize.ts";
+import {
+  createSearchMethods,
+  type SearchQueryOptions,
+  type CockpitSearchResult,
+} from "./methods/search.ts";
+import {
+  createLocalizeMethods,
+  type LocalizeOptions,
+} from "./methods/localize.ts";
 import { createSystemMethods } from "./methods/system.ts";
 
 /**
@@ -34,47 +44,45 @@ export interface CockpitAPIClient {
   // GraphQL
   graphQL<T = unknown>(
     document: DocumentNode,
-    variables?: Record<string, unknown>
+    variables?: Record<string, unknown>,
   ): Promise<T | null>;
 
   // Content API
-  getContentItem<T = unknown>(options: ContentItemQueryOptions): Promise<T | null>;
+  getContentItem<T = unknown>(
+    options: ContentItemQueryOptions,
+  ): Promise<T | null>;
   getContentItems<T = unknown>(
     model: string,
-    options?: ContentListQueryOptions
+    options?: ContentListQueryOptions,
   ): Promise<T | null>;
   getContentTree<T = unknown>(
     model: string,
-    options?: TreeQueryOptions
+    options?: TreeQueryOptions,
   ): Promise<T | null>;
   getAggregateModel<T = unknown>(
-    options: AggregateQueryOptions
+    options: AggregateQueryOptions,
   ): Promise<T | null>;
   postContentItem<T = unknown>(
     model: string,
-    item: Record<string, unknown>
+    item: Record<string, unknown>,
   ): Promise<T | null>;
   deleteContentItem<T = unknown>(model: string, id: string): Promise<T | null>;
-
-  // Singleton API
-  getSingleton<T = unknown>(
-    model: string,
-    options?: { locale?: string; populate?: number }
-  ): Promise<T | null>;
 
   // Pages API
   pages<T = unknown>(options?: ContentListQueryOptions): Promise<T | null>;
   pageById<T = unknown>(options: PageQueryOptions): Promise<T | null>;
   pageByRoute<T = unknown>(
     route: string,
-    options?: { locale?: string; populate?: number } | string
+    options?: { locale?: string; populate?: number } | string,
   ): Promise<T | null>;
 
   // Menu API
-  pagesMenus<T = unknown>(options?: MenuQueryOptions | string): Promise<T | null>;
+  pagesMenus<T = unknown>(
+    options?: MenuQueryOptions | string,
+  ): Promise<T | null>;
   pagesMenu<T = unknown>(
     name: string,
-    options?: MenuQueryOptions | string
+    options?: MenuQueryOptions | string,
   ): Promise<T | null>;
 
   // Routes & Sitemap
@@ -83,7 +91,9 @@ export interface CockpitAPIClient {
   pagesSetting<T = unknown>(locale?: string): Promise<T | null>;
 
   // Search (Detektivo addon)
-  search<T = CockpitSearchResult>(options: SearchQueryOptions): Promise<T | null>;
+  search<T = CockpitSearchResult>(
+    options: SearchQueryOptions,
+  ): Promise<T | null>;
 
   // Health & System
   healthCheck<T = unknown>(): Promise<T | null>;
@@ -91,14 +101,14 @@ export interface CockpitAPIClient {
   // Localization (Lokalize addon)
   localize<T = unknown>(
     projectName: string,
-    options?: LocalizeOptions
+    options?: LocalizeOptions,
   ): Promise<T | null>;
 
   // Assets
   assetById<T = unknown>(assetId: string): Promise<T | null>;
   imageAssetById<T = unknown>(
     assetId: string,
-    queryParams?: ImageAssetQueryParams
+    queryParams?: ImageAssetQueryParams,
   ): Promise<T | null>;
 
   // Utility
@@ -125,33 +135,50 @@ export interface CockpitAPIClient {
  * const client = await CockpitAPI();
  * ```
  */
-export async function CockpitAPI(options: CockpitAPIOptions = {}): Promise<CockpitAPIClient> {
+export async function CockpitAPI(
+  options: CockpitAPIOptions = {},
+): Promise<CockpitAPIClient> {
   // Create configuration
   const config = createConfig(options);
   const endpointString = config.endpoint.toString();
 
   // Create cache manager - env vars take precedence, then options, then cache.ts defaults
-  const envCacheMax = process.env.COCKPIT_CACHE_MAX ? parseInt(process.env.COCKPIT_CACHE_MAX, 10) : undefined;
-  const envCacheTtl = process.env.COCKPIT_CACHE_TTL ? parseInt(process.env.COCKPIT_CACHE_TTL, 10) : undefined;
+  const envCacheMax = process.env["COCKPIT_CACHE_MAX"];
+  const envCacheTtl = process.env["COCKPIT_CACHE_TTL"];
 
-  const cache = createCacheManager(config.cachePrefix, {
-    max: options.cache?.max ?? envCacheMax,
-    ttl: options.cache?.ttl ?? envCacheTtl,
-  });
+  const cacheOptions: { max?: number; ttl?: number } = {};
+  const maxValue =
+    options.cache?.max ??
+    (envCacheMax !== undefined ? parseInt(envCacheMax, 10) : undefined);
+  const ttlValue =
+    options.cache?.ttl ??
+    (envCacheTtl !== undefined ? parseInt(envCacheTtl, 10) : undefined);
+  if (maxValue !== undefined) cacheOptions.max = maxValue;
+  if (ttlValue !== undefined) cacheOptions.ttl = ttlValue;
 
-  // Generate route replacements for image path transformer
-  const routeReplacements = await generateCmsRouteReplacements(
-    endpointString,
-    options.tenant,
-    cache
-  );
+  const cache = createCacheManager(config.cachePrefix, cacheOptions);
+
+  // Generate route replacements for image path transformer (optional)
+  const routeReplacements =
+    options.preloadRoutes === true
+      ? await generateCmsRouteReplacements(
+          endpointString,
+          options.tenant,
+          cache,
+        )
+      : {};
 
   // Create response transformer
-  const transformer = createImagePathTransformer({
+  const transformerConfig: {
+    baseUrl: string;
+    tenant?: string;
+    replacements: Record<string, string>;
+  } = {
     baseUrl: config.endpoint.origin,
-    tenant: options.tenant,
     replacements: routeReplacements,
-  });
+  };
+  if (options.tenant !== undefined) transformerConfig.tenant = options.tenant;
+  const transformer = createImagePathTransformer(transformerConfig);
 
   // Create URL builder
   const urlBuilder = createUrlBuilder(config);

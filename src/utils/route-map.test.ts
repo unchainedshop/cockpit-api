@@ -70,12 +70,25 @@ describe('generateCmsRouteReplacements', () => {
     globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     const cachedData = { 'pages://cached': '/cached-route' };
-    const cache = createMockCache({ ROUTE_REPLACEMENT_MAP: cachedData });
+    const cache = createMockCache({ 'ROUTE_REPLACEMENT_MAP:cache-tenant': cachedData });
 
     const result = await generateCmsRouteReplacements(TEST_ENDPOINT, 'cache-tenant', cache);
 
     assert.deepStrictEqual(result, cachedData);
     assert.strictEqual(mockFetch.mock.calls.length, 0); // fetch should not be called
+  });
+
+  it('stores result in cache when cache provided', async () => {
+    globalThis.fetch = mock.fn(async () => createMockResponse({
+      body: [{ _id: 'page1', _r: '/about' }],
+    })) as unknown as typeof fetch;
+
+    const cache = createMockCache();
+    await generateCmsRouteReplacements(TEST_ENDPOINT, 'store-tenant', cache);
+
+    // Verify it was cached
+    const cached = cache.get<Record<string, string>>('ROUTE_REPLACEMENT_MAP:store-tenant');
+    assert.deepStrictEqual(cached, { 'pages://page1': '/about' });
   });
 });
 
@@ -131,6 +144,21 @@ describe('generateCollectionAndSingletonSlugRouteMap', () => {
     assert.strictEqual(result['posts'], '/blog');
   });
 
+  it('handles items with undefined data property', async () => {
+    globalThis.fetch = mock.fn(async () => createMockResponse({
+      body: [
+        { _r: '/no-data' },
+        { data: undefined, _r: '/undefined-data' },
+        { data: { singleton: 'homepage' }, _r: '/' },
+      ],
+    })) as unknown as typeof fetch;
+
+    const result = await generateCollectionAndSingletonSlugRouteMap(TEST_ENDPOINT, 'undefined-data-tenant');
+
+    assert.strictEqual(Object.keys(result).length, 1);
+    assert.strictEqual(result['homepage'], '/');
+  });
+
   it('returns empty object on network error (catch block)', async () => {
     globalThis.fetch = mock.fn(async () => {
       throw new Error('Network error');
@@ -147,12 +175,25 @@ describe('generateCollectionAndSingletonSlugRouteMap', () => {
     globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     const cachedData = { 'cached-collection': '/cached-route' };
-    const cache = createMockCache({ SLUG_ROUTE_MAP: cachedData });
+    const cache = createMockCache({ 'SLUG_ROUTE_MAP:cache-tenant': cachedData });
 
     const result = await generateCollectionAndSingletonSlugRouteMap(TEST_ENDPOINT, 'cache-tenant', cache);
 
     assert.deepStrictEqual(result, cachedData);
     assert.strictEqual(mockFetch.mock.calls.length, 0); // fetch should not be called
+  });
+
+  it('stores result in cache when cache provided', async () => {
+    globalThis.fetch = mock.fn(async () => createMockResponse({
+      body: [{ data: { collection: 'news' }, _r: '/news' }],
+    })) as unknown as typeof fetch;
+
+    const cache = createMockCache();
+    await generateCollectionAndSingletonSlugRouteMap(TEST_ENDPOINT, 'store-tenant', cache);
+
+    // Verify it was cached
+    const cached = cache.get<Record<string, string>>('SLUG_ROUTE_MAP:store-tenant');
+    assert.deepStrictEqual(cached, { news: '/news' });
   });
 
   it('returns empty object when response is not array', async () => {

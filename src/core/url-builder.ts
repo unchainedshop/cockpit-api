@@ -23,17 +23,21 @@ export interface UrlBuilder {
 }
 
 /**
- * Normalizes locale value (de -> default)
+ * Creates a locale normalizer for the given default language
  */
-const normalizeLocale = (locale: string): string => {
-  return locale === "de" ? "default" : locale;
+const createLocaleNormalizer = (defaultLanguage: string) => {
+  return (locale: string): string => {
+    return locale === defaultLanguage ? "default" : locale;
+  };
 };
 
 /**
  * Creates a URL builder for the given configuration
  */
 export function createUrlBuilder(config: CockpitConfig): UrlBuilder {
-  const apiBasePath = config.tenant ? `/:${config.tenant}/api` : "/api";
+  const apiBasePath =
+    config.tenant !== undefined ? `/:${config.tenant}/api` : "/api";
+  const normalizeLocale = createLocaleNormalizer(config.defaultLanguage);
 
   return {
     build(path: string, options: UrlBuildOptions = {}): URL {
@@ -48,7 +52,7 @@ export function createUrlBuilder(config: CockpitConfig): UrlBuilder {
         locale: normalizedLocale,
       });
 
-      if (queryString) {
+      if (queryString !== null) {
         url.search = queryString;
       }
 
@@ -57,7 +61,7 @@ export function createUrlBuilder(config: CockpitConfig): UrlBuilder {
 
     graphqlEndpoint(): URL {
       const url = new URL(config.endpoint);
-      if (config.tenant) {
+      if (config.tenant !== undefined) {
         url.pathname = `/:${config.tenant}${url.pathname}`;
       }
       return url;

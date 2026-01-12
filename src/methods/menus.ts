@@ -29,7 +29,7 @@ export interface CockpitMenuLink {
     [key: string]: unknown;
   };
   children?: CockpitMenuLink[];
-  meta?: Array<{ key: string; value: string }>;
+  meta?: { key: string; value: string }[];
 }
 
 export interface CockpitMenu {
@@ -47,23 +47,39 @@ export interface CockpitMenu {
 // ============================================================================
 
 export interface MenuMethods {
-  pagesMenus<T = unknown>(options?: MenuQueryOptions | string): Promise<T | null>;
-  pagesMenu<T = unknown>(name: string, options?: MenuQueryOptions | string): Promise<T | null>;
+  pagesMenus<T = unknown>(
+    options?: MenuQueryOptions | string,
+  ): Promise<T | null>;
+  pagesMenu<T = unknown>(
+    name: string,
+    options?: MenuQueryOptions | string,
+  ): Promise<T | null>;
 }
 
 export function createMenuMethods(ctx: MethodContext): MenuMethods {
   return {
-    async pagesMenus<T = unknown>(options: MenuQueryOptions | string = "default"): Promise<T | null> {
+    async pagesMenus<T = unknown>(
+      options: MenuQueryOptions | string = "default",
+    ): Promise<T | null> {
       const opts = typeof options === "string" ? { locale: options } : options;
       const { locale = "default", inactive } = opts;
-      const url = ctx.url.build("/pages/menus", { locale, queryParams: { inactive } });
+      const url = ctx.url.build("/pages/menus", {
+        locale,
+        queryParams: { inactive },
+      });
       return ctx.http.fetch<T>(url);
     },
 
-    async pagesMenu<T = unknown>(name: string, options: MenuQueryOptions | string = "default"): Promise<T | null> {
+    async pagesMenu<T = unknown>(
+      name: string,
+      options: MenuQueryOptions | string = "default",
+    ): Promise<T | null> {
       const opts = typeof options === "string" ? { locale: options } : options;
       const { locale = "default", inactive } = opts;
-      const url = ctx.url.build(`/pages/menu/${name}`, { locale, queryParams: { inactive } });
+      const url = ctx.url.build(`/pages/menu/${name}`, {
+        locale,
+        queryParams: { inactive },
+      });
       return ctx.http.fetch<T>(url);
     },
   };
