@@ -609,15 +609,85 @@ describe('CockpitAPI', () => {
   });
 
   describe('clearCache', () => {
-    it('clears cache without error', async () => {
+    it('clears cache without error (async)', async () => {
       const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
-      client.clearCache();
+      await client.clearCache();
       assert.ok(true);
     });
 
-    it('clears cache with pattern without error', async () => {
+    it('clears cache with pattern without error (async)', async () => {
       const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
-      client.clearCache('ROUTE');
+      await client.clearCache('ROUTE');
+      assert.ok(true);
+    });
+  });
+
+  describe('cache configuration', () => {
+    beforeEach(() => {
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+    });
+
+    it('disables cache when cache: false', async () => {
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        cache: false,
+      });
+
+      // First call should hit the API
+      await client.getContentItems('posts');
+      assert.strictEqual(mockFetch.mock.calls.length, 1);
+
+      // Reset mock to count fresh
+      mock.reset();
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      // Second identical call should ALSO hit the API (no caching)
+      await client.getContentItems('posts');
+      assert.strictEqual(mockFetch.mock.calls.length, 1);
+    });
+
+    it('uses custom async store when provided', async () => {
+      const store = new Map<string, unknown>();
+      const customStore = {
+        async get(key: string) {
+          return store.get(key);
+        },
+        async set(key: string, value: unknown) {
+          store.set(key, value);
+        },
+        async clear(pattern?: string) {
+          if (pattern) {
+            for (const key of store.keys()) {
+              if (key.startsWith(pattern)) {
+                store.delete(key);
+              }
+            }
+          } else {
+            store.clear();
+          }
+        },
+      };
+
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        cache: { store: customStore },
+      });
+
+      assert.ok(client);
+      // Client should initialize correctly with custom store
+    });
+
+    it('clearCache works with disabled cache', async () => {
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        cache: false,
+      });
+
+      // Should not throw even though cache is disabled
+      await client.clearCache();
+      await client.clearCache('PATTERN');
       assert.ok(true);
     });
   });

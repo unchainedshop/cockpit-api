@@ -13,7 +13,25 @@ export interface CockpitHealthCheck {
 
 export interface SystemMethods {
   healthCheck<T = unknown>(): Promise<T | null>;
-  clearCache(pattern?: string): void;
+  /**
+   * Clear cache entries matching pattern
+   *
+   * **BREAKING CHANGE (v3.0.0)**: This method is now async and returns a Promise
+   *
+   * @param pattern - Optional pattern to clear specific cache entries
+   * @returns Promise that resolves when clearing is complete
+   *
+   * @example Clear all cache
+   * ```typescript
+   * await client.clearCache();
+   * ```
+   *
+   * @example Clear route cache only
+   * ```typescript
+   * await client.clearCache('ROUTE');
+   * ```
+   */
+  clearCache(pattern?: string): Promise<void>;
 }
 
 export function createSystemMethods(ctx: MethodContext): SystemMethods {
@@ -23,8 +41,8 @@ export function createSystemMethods(ctx: MethodContext): SystemMethods {
       return ctx.http.fetch<T>(url);
     },
 
-    clearCache(pattern?: string): void {
-      ctx.cache.clear(pattern);
+    async clearCache(pattern?: string): Promise<void> {
+      await ctx.cache.clear(pattern);
     },
   };
 }

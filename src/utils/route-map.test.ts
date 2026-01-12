@@ -7,12 +7,18 @@ import {
   generateCollectionAndSingletonSlugRouteMap,
 } from './route-map.ts';
 
-function createMockCache(initialData: Record<string, unknown> = {}): CacheManager {
+function createMockCache(
+  initialData: Record<string, unknown> = {},
+): CacheManager {
   const store = new Map<string, unknown>(Object.entries(initialData));
   return {
-    get: <T>(key: string) => store.get(key) as T | undefined,
-    set: <T>(key: string, value: T) => { store.set(key, value); },
-    clear: () => { store.clear(); },
+    get: async <T>(key: string) => store.get(key) as T | undefined,
+    set: async <T>(key: string, value: T) => {
+      store.set(key, value);
+    },
+    clear: async () => {
+      store.clear();
+    },
   };
 }
 
@@ -84,11 +90,13 @@ describe('generateCmsRouteReplacements', () => {
     })) as unknown as typeof fetch;
 
     const cache = createMockCache();
-    await generateCmsRouteReplacements(TEST_ENDPOINT, 'store-tenant', cache);
+    await generateCmsRouteReplacements(TEST_ENDPOINT, "store-tenant", cache);
 
     // Verify it was cached
-    const cached = cache.get<Record<string, string>>('ROUTE_REPLACEMENT_MAP:store-tenant');
-    assert.deepStrictEqual(cached, { 'pages://page1': '/about' });
+    const cached = await cache.get<Record<string, string>>(
+      "ROUTE_REPLACEMENT_MAP:store-tenant",
+    );
+    assert.deepStrictEqual(cached, { "pages://page1": "/about" });
   });
 });
 
@@ -189,11 +197,17 @@ describe('generateCollectionAndSingletonSlugRouteMap', () => {
     })) as unknown as typeof fetch;
 
     const cache = createMockCache();
-    await generateCollectionAndSingletonSlugRouteMap(TEST_ENDPOINT, 'store-tenant', cache);
+    await generateCollectionAndSingletonSlugRouteMap(
+      TEST_ENDPOINT,
+      "store-tenant",
+      cache,
+    );
 
     // Verify it was cached
-    const cached = cache.get<Record<string, string>>('SLUG_ROUTE_MAP:store-tenant');
-    assert.deepStrictEqual(cached, { news: '/news' });
+    const cached = await cache.get<Record<string, string>>(
+      "SLUG_ROUTE_MAP:store-tenant",
+    );
+    assert.deepStrictEqual(cached, { news: "/news" });
   });
 
   it('returns empty object when response is not array', async () => {

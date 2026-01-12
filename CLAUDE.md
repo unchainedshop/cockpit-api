@@ -259,3 +259,164 @@ FetchClientOptions, FetchCacheMode, PageFetchParams
     const metaObj = transformMeta(link.meta);
     const layout = metaObj.layout;
     ```
+
+## v3.0.0 Breaking Changes
+
+### Async Cache Operations
+
+All cache operations are now async and return Promises. This enables support for external cache stores like Redis and Keyv.
+
+**Before (v2.x)**:
+```typescript
+client.clearCache();
+client.clearCache('ROUTE');
+```
+
+**After (v3.0.0)**:
+```typescript
+await client.clearCache();
+await client.clearCache('ROUTE');
+```
+
+**Impact**: Any code calling `clearCache()` must now `await` the result.
+
+### Custom Cache Store Support
+
+v3.0.0 adds pluggable async cache support. You can now provide custom cache implementations:
+
+#### Redis Example
+
+```typescript
+import { createClient } from 'redis';
+import type { AsyncCacheStore } from '@unchainedshop/cockpit-api';
+
+const redisClient = createClient({ url: process.env.REDIS_URL });
+await redisClient.connect();
+
+const redisStore: AsyncCacheStore = {
+  async get(key: string) {
+    const value = await redisClient.get(key);
+    return value ? JSON.parse(value) : undefined;
+  },
+  async set(key: string, value: unknown) {
+    await redisClient.set(key, JSON.stringify(value), { EX: 100 });
+  },
+  async clear(pattern?: string) {
+    if (pattern) {
+      const keys = await redisClient.keys(`${pattern}*`);
+      if (keys.length > 0) await redisClient.del(keys);
+    } else {
+      await redisClient.flushDb();
+    }
+  }
+};
+
+const client = await CockpitAPI({
+  endpoint: 'https://cms.example.com/api/graphql',
+  cache: { store: redisStore }
+});
+```
+
+#### Keyv Example
+
+```typescript
+import Keyv from 'keyv';
+import KeyvRedis from '@keyv/redis';
+import type { AsyncCacheStore } from '@unchainedshop/cockpit-api';
+
+const keyv = new Keyv({
+  store: new KeyvRedis(process.env.REDIS_URL)
+});
+
+const keyvStore: AsyncCacheStore = {
+  async get(key: string) {
+    return await keyv.get(key);
+  },
+  async set(key: string, value: unknown) {
+    await keyv.set(key, value, 100000); // 100000ms TTL
+  },
+  async clear(pattern?: string) {
+    if (!pattern) {
+      await keyv.clear();
+    }
+    // Note: Keyv doesn't have native pattern matching
+    // Pattern matching requires custom implementation
+  }
+};
+
+const client = await CockpitAPI({
+  endpoint: 'https://cms.example.com/api/graphql',
+  cache: { store: keyvStore }
+});
+```
+
+### Disabling Cache
+
+You can now explicitly disable caching:
+
+```typescript
+const client = await CockpitAPI({
+  endpoint: 'https://cms.example.com/api/graphql',
+  cache: false  // Disables all caching
+});
+```
+
+### Migration Guide: v2.x → v3.0.0
+
+#### 1. Update clearCache() Calls
+
+All `clearCache()` calls must now be awaited:
+
+```typescript
+// Before (v2.x)
+client.clearCache();
+client.clearCache('ROUTE');
+
+// After (v3.0.0)
+await client.clearCache();
+await client.clearCache('ROUTE');
+```
+
+#### 2. Update Tests with Mock Cache
+
+If your tests mock the cache, update them to use async operations:
+
+```typescript
+// Before (v2.x)
+const mockCache = {
+  get: (key) => store.get(key),
+  set: (key, value) => store.set(key, value),
+  clear: () => store.clear()
+};
+
+// After (v3.0.0)
+const mockCache = {
+  get: async (key) => store.get(key),
+  set: async (key, value) => store.set(key, value),
+  clear: async () => store.clear()
+};
+```
+
+#### 3. Error Handling
+
+Cache errors now propagate as rejected promises. Wrap cache operations in try-catch if you need custom error handling:
+
+```typescript
+try {
+  await client.clearCache();
+} catch (error) {
+  console.error('Failed to clear cache:', error);
+}
+```
+
+### Important Notes
+
+- **TTL Behavior**: The default LRU cache handles TTL automatically. Custom stores must implement their own TTL logic (e.g., Redis `EX` option).
+
+- **Pattern Matching**: Pattern matching in `clear(pattern)` is implementation-specific. The default LRU store uses `startsWith()` matching. Redis uses glob patterns (`*`, `?`, `[]`). Custom stores should document their pattern matching behavior.
+
+- **Serialization**: The default LRU stores objects directly in memory (no serialization). External stores like Redis must serialize data (typically using JSON.stringify/parse). Custom stores are responsible for their own serialization.
+
+- **Environment Variables**: `COCKPIT_CACHE_MAX` and `COCKPIT_CACHE_TTL` are only used when no custom cache store is provided. They are ignored when using a custom store.
+
+- **No-Op Cache**: When `cache: false`, all cache operations become no-ops but still return Promises for API consistency.

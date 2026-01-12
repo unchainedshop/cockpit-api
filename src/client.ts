@@ -4,7 +4,11 @@
 
 import type { DocumentNode } from "graphql";
 import { createConfig, type CockpitAPIOptions } from "./core/config.ts";
-import { createCacheManager } from "./core/cache.ts";
+import {
+  createCacheManager,
+  createNoOpCacheManager,
+  type CacheOptions,
+} from "./core/cache.ts";
 import { createUrlBuilder } from "./core/url-builder.ts";
 import { createHttpClient } from "./core/http.ts";
 import { createImagePathTransformer } from "./transformers/image-path.ts";
@@ -144,7 +148,25 @@ export interface CockpitAPIClient {
 
   // Utility
   getFullRouteForSlug(slug: string): Promise<string | undefined>;
-  clearCache(pattern?: string): void;
+  /**
+   * Clear cache entries matching pattern
+   *
+   * **BREAKING CHANGE (v3.0.0)**: This method is now async and returns a Promise
+   *
+   * @param pattern - Optional pattern to clear specific cache entries
+   * @returns Promise that resolves when clearing is complete
+   *
+   * @example Clear all cache
+   * ```typescript
+   * await client.clearCache();
+   * ```
+   *
+   * @example Clear route cache only
+   * ```typescript
+   * await client.clearCache('ROUTE');
+   * ```
+   */
+  clearCache(pattern?: string): Promise<void>;
 }
 
 /**
@@ -173,21 +195,42 @@ export async function CockpitAPI(
   const config = createConfig(options);
   const endpointString = config.endpoint.toString();
 
-  // Create cache manager - env vars take precedence, then options, then cache.ts defaults
-  const envCacheMax = process.env["COCKPIT_CACHE_MAX"];
-  const envCacheTtl = process.env["COCKPIT_CACHE_TTL"];
+  // Create cache manager based on options
+  let cache;
 
-  const cacheOptions: { max?: number; ttl?: number } = {};
-  const maxValue =
-    options.cache?.max ??
-    (envCacheMax !== undefined ? parseInt(envCacheMax, 10) : undefined);
-  const ttlValue =
-    options.cache?.ttl ??
-    (envCacheTtl !== undefined ? parseInt(envCacheTtl, 10) : undefined);
-  if (maxValue !== undefined) cacheOptions.max = maxValue;
-  if (ttlValue !== undefined) cacheOptions.ttl = ttlValue;
+  if (options.cache === false) {
+    // Cache explicitly disabled - use no-op cache
+    cache = createNoOpCacheManager();
+  } else {
+    // Cache enabled - determine options
+    const envCacheMax = process.env["COCKPIT_CACHE_MAX"];
+    const envCacheTtl = process.env["COCKPIT_CACHE_TTL"];
 
-  const cache = createCacheManager(config.cachePrefix, cacheOptions);
+    const cacheOptions: CacheOptions = {};
+
+    // If custom store provided, use it directly
+    if (options.cache && "store" in options.cache) {
+      cacheOptions.store = options.cache.store;
+    } else {
+      // Use max/ttl from options or env vars (for default LRU store)
+      const maxValue =
+        options.cache && "max" in options.cache
+          ? options.cache.max
+          : envCacheMax !== undefined
+            ? parseInt(envCacheMax, 10)
+            : undefined;
+      const ttlValue =
+        options.cache && "ttl" in options.cache
+          ? options.cache.ttl
+          : envCacheTtl !== undefined
+            ? parseInt(envCacheTtl, 10)
+            : undefined;
+      if (maxValue !== undefined) cacheOptions.max = maxValue;
+      if (ttlValue !== undefined) cacheOptions.ttl = ttlValue;
+    }
+
+    cache = createCacheManager(config.cachePrefix, cacheOptions);
+  }
 
   // Generate route replacements for image path transformer (optional)
   const routeReplacements =

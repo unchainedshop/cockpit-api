@@ -31,7 +31,9 @@ export async function generateCmsRouteReplacements(
   const cacheKey = `ROUTE_REPLACEMENT_MAP:${tenant ?? "default"}`;
 
   if (cache) {
-    const cached = cache.get(cacheKey) as Record<string, string> | undefined;
+    const cached = (await cache.get(cacheKey)) as
+      | Record<string, string>
+      | undefined;
     if (cached) return cached;
   }
 
@@ -68,7 +70,7 @@ export async function generateCmsRouteReplacements(
     );
 
     if (cache) {
-      cache.set(cacheKey, replacement);
+      await cache.set(cacheKey, replacement);
     }
 
     return replacement;
@@ -89,7 +91,9 @@ export async function generateCollectionAndSingletonSlugRouteMap(
   const cacheKey = `SLUG_ROUTE_MAP:${tenant ?? "default"}`;
 
   if (cache) {
-    const cached = cache.get(cacheKey) as Record<string, string> | undefined;
+    const cached = (await cache.get(cacheKey)) as
+      | Record<string, string>
+      | undefined;
     if (cached) return cached;
   }
 
@@ -131,7 +135,7 @@ export async function generateCollectionAndSingletonSlugRouteMap(
     );
 
     if (cache) {
-      cache.set(cacheKey, pageMap);
+      await cache.set(cacheKey, pageMap);
     }
 
     return pageMap;

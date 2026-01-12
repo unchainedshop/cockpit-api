@@ -3,6 +3,7 @@
  */
 
 import { resolveApiKey } from "../utils/tenant.ts";
+import type { CacheOptions } from "./cache.ts";
 
 export interface CockpitAPIOptions {
   /** Cockpit CMS endpoint URL (falls back to COCKPIT_GRAPHQL_ENDPOINT env var) */
@@ -18,13 +19,61 @@ export interface CockpitAPIOptions {
    * When a request uses this language, it will be sent as "default" to Cockpit.
    */
   defaultLanguage?: string | null;
-  /** Cache configuration */
-  cache?: {
-    /** Max entries (falls back to COCKPIT_CACHE_MAX env var, default: 100) */
-    max?: number;
-    /** TTL in ms (falls back to COCKPIT_CACHE_TTL env var, default: 100000) */
-    ttl?: number;
-  };
+  /**
+   * Cache configuration
+   *
+   * - Set to `false` to disable caching entirely
+   * - Set to an object to configure cache behavior
+   * - Omit to use default LRU cache with env var fallbacks
+   *
+   * @example Disable cache
+   * ```typescript
+   * const client = await CockpitAPI({
+   *   endpoint: 'https://cms.example.com',
+   *   cache: false
+   * });
+   * ```
+   *
+   * @example Custom cache options
+   * ```typescript
+   * const client = await CockpitAPI({
+   *   endpoint: 'https://cms.example.com',
+   *   cache: { max: 200, ttl: 300000 }
+   * });
+   * ```
+   *
+   * @example Redis store
+   * ```typescript
+   * import { createClient } from 'redis';
+   *
+   * const redisClient = createClient({ url: process.env.REDIS_URL });
+   * await redisClient.connect();
+   *
+   * const client = await CockpitAPI({
+   *   endpoint: 'https://cms.example.com',
+   *   cache: {
+   *     store: {
+   *       async get(key) {
+   *         const val = await redisClient.get(key);
+   *         return val ? JSON.parse(val) : undefined;
+   *       },
+   *       async set(key, value) {
+   *         await redisClient.set(key, JSON.stringify(value), { EX: 100 });
+   *       },
+   *       async clear(pattern) {
+   *         if (pattern) {
+   *           const keys = await redisClient.keys(\`\${pattern}*\`);
+   *           if (keys.length > 0) await redisClient.del(keys);
+   *         } else {
+   *           await redisClient.flushDb();
+   *         }
+   *       }
+   *     }
+   *   }
+   * });
+   * ```
+   */
+  cache?: false | CacheOptions;
   /**
    * Preload route replacements during client initialization.
    * When true, fetches page routes to enable `pages://id` link resolution in responses.

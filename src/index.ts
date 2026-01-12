@@ -8,7 +8,11 @@ export { CockpitAPI } from "./client.ts";
 export type { CockpitAPIClient } from "./client.ts";
 
 export type { CockpitAPIOptions } from "./core/config.ts";
-export type { CacheManager, CacheOptions } from "./core/cache.ts";
+export type {
+  CacheManager,
+  CacheOptions,
+  AsyncCacheStore,
+} from "./core/cache.ts";
 
 export {
   getTenantIds,
