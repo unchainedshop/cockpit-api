@@ -236,7 +236,7 @@ FetchClientOptions, FetchCacheMode, PageFetchParams
 - `defaultLanguage` option to configure which language maps to Cockpit's "default" locale (defaults to "de")
 - Expanded tenant utilities: `resolveTenantFromUrl()`, `resolveTenantFromSubdomain()`
 
-## v2.1.3 Improvements
+## v2.1.3 (Features)
 
 - **Flexible meta type**: `CockpitMenuLink.meta` now accepts both array and object formats
   - Type: `meta?: { key: string; value: string }[] | Record<string, string>`
@@ -260,19 +260,19 @@ FetchClientOptions, FetchCacheMode, PageFetchParams
     const layout = metaObj.layout;
     ```
 
-## v3.0.0 Breaking Changes
+## v2.2.0 (Breaking Changes)
 
 ### Async Cache Operations
 
 All cache operations are now async and return Promises. This enables support for external cache stores like Redis and Keyv.
 
-**Before (v2.x)**:
+**Before (v2.1.x)**:
 ```typescript
 client.clearCache();
 client.clearCache('ROUTE');
 ```
 
-**After (v3.0.0)**:
+**After (v2.2.0)**:
 ```typescript
 await client.clearCache();
 await client.clearCache('ROUTE');
@@ -282,7 +282,7 @@ await client.clearCache('ROUTE');
 
 ### Custom Cache Store Support
 
-v3.0.0 adds pluggable async cache support. You can now provide custom cache implementations:
+v2.2.0 adds pluggable async cache support. You can now provide custom cache implementations:
 
 #### Redis Example
 
@@ -361,18 +361,18 @@ const client = await CockpitAPI({
 });
 ```
 
-### Migration Guide: v2.x → v3.0.0
+### Migration Guide: v2.1.x → v2.2.0
 
 #### 1. Update clearCache() Calls
 
 All `clearCache()` calls must now be awaited:
 
 ```typescript
-// Before (v2.x)
+// Before (v2.1.x)
 client.clearCache();
 client.clearCache('ROUTE');
 
-// After (v3.0.0)
+// After (v2.2.0)
 await client.clearCache();
 await client.clearCache('ROUTE');
 ```
@@ -382,14 +382,14 @@ await client.clearCache('ROUTE');
 If your tests mock the cache, update them to use async operations:
 
 ```typescript
-// Before (v2.x)
+// Before (v2.1.x)
 const mockCache = {
   get: (key) => store.get(key),
   set: (key, value) => store.set(key, value),
   clear: () => store.clear()
 };
 
-// After (v3.0.0)
+// After (v2.2.0)
 const mockCache = {
   get: async (key) => store.get(key),
   set: async (key, value) => store.set(key, value),

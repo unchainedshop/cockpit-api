@@ -206,9 +206,9 @@ const image = await cockpit.imageAssetById('asset-id', {
 // Health check
 const health = await cockpit.healthCheck();
 
-// Clear cache
-cockpit.clearCache();  // Clear all
-cockpit.clearCache('pages');  // Clear by pattern
+// Clear cache (async in v2.2.0+)
+await cockpit.clearCache();  // Clear all
+await cockpit.clearCache('pages');  // Clear by pattern
 ```
 
 ## Lightweight Fetch Client API
@@ -275,7 +275,10 @@ const cockpit = await CockpitAPI({
   cache: {
     max: 100,                   // Falls back to COCKPIT_CACHE_MAX (default: 100)
     ttl: 100000,                // Falls back to COCKPIT_CACHE_TTL (default: 100000)
+    store: customStore,         // Optional: custom async cache store (Redis, Keyv, etc.)
   },
+  // Or disable caching entirely
+  // cache: false,
 });
 ```
 
@@ -305,6 +308,42 @@ const { tenant, slug } = resolveTenantFromUrl('https://mytenant.example.com/page
 const allTenants = getTenantIds();  // From COCKPIT_SECRET_* env vars
 ```
 
+## Custom Cache Stores
+
+v2.2.0+ supports pluggable async cache stores for Redis, Keyv, or custom implementations:
+
+```typescript
+import { createClient } from 'redis';
+import type { AsyncCacheStore } from '@unchainedshop/cockpit-api';
+
+// Redis example
+const redisClient = createClient({ url: process.env.REDIS_URL });
+await redisClient.connect();
+
+const redisStore: AsyncCacheStore = {
+  async get(key: string) {
+    const value = await redisClient.get(key);
+    return value ? JSON.parse(value) : undefined;
+  },
+  async set(key: string, value: unknown) {
+    await redisClient.set(key, JSON.stringify(value), { EX: 100 });
+  },
+  async clear(pattern?: string) {
+    if (pattern) {
+      const keys = await redisClient.keys(`${pattern}*`);
+      if (keys.length > 0) await redisClient.del(keys);
+    } else {
+      await redisClient.flushDb();
+    }
+  }
+};
+
+const cockpit = await CockpitAPI({
+  endpoint: 'https://cms.example.com/api/graphql',
+  cache: { store: redisStore }
+});
+```
+
 ## TypeScript Support
 
 ```typescript
@@ -314,6 +353,7 @@ import type {
   CockpitAPIOptions,
   CacheManager,
   CacheOptions,
+  AsyncCacheStore,
 
   // Query Options
   ContentItemQueryOptions,
@@ -359,6 +399,25 @@ import { ImageSizeMode, MimeType } from '@unchainedshop/cockpit-api';
 - `preloadRoutes` option for preloading route replacements
 - `defaultLanguage` option to configure which language maps to Cockpit's "default" locale
 - Expanded tenant utilities: `resolveTenantFromUrl()`, `resolveTenantFromSubdomain()`
+
+### v2.2.0 (Breaking Changes)
+
+**Async Cache Operations:**
+- All cache operations are now async and return Promises
+- `await cockpit.clearCache()` is now required (was synchronous in v2.1.x)
+- Custom cache stores can be provided via `cache.store` option
+- Cache can be explicitly disabled with `cache: false`
+
+**Migration:**
+```typescript
+// Before (v2.1.x)
+cockpit.clearCache();
+cockpit.clearCache('ROUTE');
+
+// After (v2.2.0)
+await cockpit.clearCache();
+await cockpit.clearCache('ROUTE');
+```
 
 ## Peer Dependencies
 
