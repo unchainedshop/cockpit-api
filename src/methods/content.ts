@@ -7,10 +7,6 @@ import type { UrlBuilder } from "../core/url-builder.ts";
 import type { CacheManager } from "../core/cache.ts";
 import { requireParam, validatePathSegment } from "../core/validation.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface MethodContext {
   readonly http: HttpClient;
   readonly url: UrlBuilder;
@@ -77,10 +73,6 @@ export interface CockpitTreeNode<T = CockpitContentItem> {
   children?: CockpitTreeNode<T>[];
   data?: T;
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 export interface ContentMethods {
   getContentItem<T = unknown>(

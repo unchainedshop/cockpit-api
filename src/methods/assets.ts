@@ -5,10 +5,6 @@
 import type { MethodContext } from "./content.ts";
 import { requireParam } from "../core/validation.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface CockpitAsset {
   _id: string;
   path: string;
@@ -59,35 +55,41 @@ export interface ImageAssetQueryParams {
   o?: number;
 }
 
-// ============================================================================
-// Implementation
-// ============================================================================
-
 export interface AssetMethods {
-  assetById<T = unknown>(assetId: string): Promise<T | null>;
-  imageAssetById<T = unknown>(
+  assetById<T = CockpitAsset>(assetId: string): Promise<T | null>;
+  /**
+   * Get a transformed image asset URL.
+   *
+   * **Important:** The `w` (width) or `h` (height) parameter is required by the API.
+   * Without it, the API returns a 400 error.
+   *
+   * @param assetId - The asset ID
+   * @param queryParams - Image transformation parameters (w or h required)
+   * @returns URL string to the generated image, or null if not found
+   */
+  imageAssetById(
     assetId: string,
     queryParams?: ImageAssetQueryParams,
-  ): Promise<T | null>;
+  ): Promise<string | null>;
 }
 
 export function createAssetMethods(ctx: MethodContext): AssetMethods {
   return {
-    async assetById<T = unknown>(assetId: string): Promise<T | null> {
+    async assetById<T = CockpitAsset>(assetId: string): Promise<T | null> {
       requireParam(assetId, "assetId");
       const url = ctx.url.build(`/assets/${assetId}`);
       return ctx.http.fetch<T>(url);
     },
 
-    async imageAssetById<T = unknown>(
+    async imageAssetById(
       assetId: string,
       queryParams?: ImageAssetQueryParams,
-    ): Promise<T | null> {
+    ): Promise<string | null> {
       requireParam(assetId, "assetId");
       const url = ctx.url.build(`/assets/image/${assetId}`, {
         queryParams: queryParams as Record<string, unknown>,
       });
-      return ctx.http.fetch<T>(url);
+      return ctx.http.fetchText(url);
     },
   };
 }

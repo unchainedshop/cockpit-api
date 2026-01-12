@@ -4,23 +4,11 @@
  * @packageDocumentation
  */
 
-// ============================================================================
-// Client & Factory
-// ============================================================================
-
 export { CockpitAPI } from "./client.ts";
 export type { CockpitAPIClient } from "./client.ts";
 
-// ============================================================================
-// Configuration
-// ============================================================================
-
 export type { CockpitAPIOptions } from "./core/config.ts";
 export type { CacheManager, CacheOptions } from "./core/cache.ts";
-
-// ============================================================================
-// Tenant Utilities
-// ============================================================================
 
 export {
   getTenantIds,
@@ -33,18 +21,10 @@ export type {
   ResolveTenantFromSubdomainOptions,
 } from "./utils/tenant.ts";
 
-// ============================================================================
-// Route Utilities
-// ============================================================================
-
 export {
   generateCmsRouteReplacements,
   generateCollectionAndSingletonSlugRouteMap,
 } from "./utils/route-map.ts";
-
-// ============================================================================
-// Transformers
-// ============================================================================
 
 export type { ResponseTransformer } from "./transformers/image-path.ts";
 export {
@@ -59,10 +39,6 @@ export {
   composeTransformers,
 } from "./transformers/index.ts";
 
-// ============================================================================
-// Query Option Types
-// ============================================================================
-
 export type {
   MethodContext,
   ListQueryOptions,
@@ -76,26 +52,14 @@ export type { MenuQueryOptions } from "./methods/menus.ts";
 export type { SearchQueryOptions } from "./methods/search.ts";
 export type { LocalizeOptions } from "./methods/localize.ts";
 
-// ============================================================================
-// Response Types - Content
-// ============================================================================
-
 export type {
   CockpitContentItem,
   CockpitNewsItem,
   CockpitTreeNode,
 } from "./methods/content.ts";
 
-// ============================================================================
-// Response Types - Assets
-// ============================================================================
-
 export { ImageSizeMode, MimeType } from "./methods/assets.ts";
 export type { CockpitAsset, ImageAssetQueryParams } from "./methods/assets.ts";
-
-// ============================================================================
-// Response Types - Pages
-// ============================================================================
 
 export type {
   CockpitPageType,
@@ -105,19 +69,11 @@ export type {
   CockpitPage,
 } from "./methods/pages.ts";
 
-// ============================================================================
-// Response Types - Menus
-// ============================================================================
-
 export type {
   CockpitMenuUrl,
   CockpitMenuLink,
   CockpitMenu,
 } from "./methods/menus.ts";
-
-// ============================================================================
-// Response Types - Routes & Settings
-// ============================================================================
 
 export type {
   CockpitRoute,
@@ -127,17 +83,9 @@ export type {
   CockpitSettings,
 } from "./methods/routes.ts";
 
-// ============================================================================
-// Response Types - Search
-// ============================================================================
-
 export type {
   CockpitSearchHit,
   CockpitSearchResult,
 } from "./methods/search.ts";
-
-// ============================================================================
-// Response Types - System
-// ============================================================================
 
 export type { CockpitHealthCheck } from "./methods/system.ts";

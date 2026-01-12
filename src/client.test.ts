@@ -379,6 +379,95 @@ describe('CockpitAPI', () => {
         'Please provide assetId'
       );
     });
+
+    it('returns URL string from text response', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      // API returns plain text URL, not JSON
+      const expectedUrl = 'https://cms.example.com/storage/uploads/image.jpg';
+      mockFetch = mock.fn(async () => ({
+        ok: true,
+        status: 200,
+        url: 'https://test.cockpit.com/api/assets/image/123',
+        text: async () => expectedUrl,
+        headers: new Headers(),
+        redirected: false,
+        statusText: 'OK',
+        type: 'basic',
+        clone: () => ({}),
+        body: null,
+        bodyUsed: false,
+        arrayBuffer: async () => new ArrayBuffer(0),
+        blob: async () => new Blob(),
+        formData: async () => new FormData(),
+        bytes: async () => new Uint8Array(),
+      } as Response));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.imageAssetById('asset123', { w: 200 });
+
+      assert.strictEqual(result, expectedUrl);
+      assert.strictEqual(typeof result, 'string');
+    });
+
+    it('returns null for 404 response', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => ({
+        ok: false,
+        status: 404,
+        url: 'https://test.cockpit.com/api/assets/image/notfound',
+        text: async () => 'Not found',
+        headers: new Headers(),
+        redirected: false,
+        statusText: 'Not Found',
+        type: 'basic',
+        clone: () => ({}),
+        body: null,
+        bodyUsed: false,
+        arrayBuffer: async () => new ArrayBuffer(0),
+        blob: async () => new Blob(),
+        formData: async () => new FormData(),
+        bytes: async () => new Uint8Array(),
+      } as Response));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.imageAssetById('notfound', { w: 100 });
+
+      assert.strictEqual(result, null);
+    });
+
+    it('constructs correct URL with query params', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => ({
+        ok: true,
+        status: 200,
+        url: 'https://test.cockpit.com/api/assets/image/123',
+        text: async () => 'https://example.com/image.jpg',
+        headers: new Headers(),
+        redirected: false,
+        statusText: 'OK',
+        type: 'basic',
+        clone: () => ({}),
+        body: null,
+        bodyUsed: false,
+        arrayBuffer: async () => new ArrayBuffer(0),
+        blob: async () => new Blob(),
+        formData: async () => new FormData(),
+        bytes: async () => new Uint8Array(),
+      } as Response));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.imageAssetById('asset123', { w: 200, h: 150, q: 80 });
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      const urlStr = url.toString();
+      assert.ok(urlStr.includes('/assets/image/asset123'));
+      assert.ok(urlStr.includes('w=200'));
+      assert.ok(urlStr.includes('h=150'));
+      assert.ok(urlStr.includes('q=80'));
+    });
   });
 
   describe('error handling', () => {

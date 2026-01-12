@@ -16,9 +16,17 @@ export interface HttpFetchOptions extends RequestInit {
 
 export interface HttpClient {
   /**
-   * Make a GET request
+   * Make a GET request expecting JSON response
    */
   fetch<T>(url: URL | string, options?: HttpFetchOptions): Promise<T | null>;
+
+  /**
+   * Make a GET request expecting text response (e.g., URL strings)
+   */
+  fetchText(
+    url: URL | string,
+    options?: HttpFetchOptions,
+  ): Promise<string | null>;
 
   /**
    * Make a POST request with JSON body
@@ -95,42 +103,70 @@ export function createHttpClient(
     return headers;
   };
 
-  const handleResponse = async <T>(response: Response): Promise<T | null> => {
-    if (response.status === 404) return null;
+  const handleErrorResponse = async (response: Response): Promise<null> => {
+    const errorText = await response.text();
+    logger.error(`Cockpit: Error accessing ${response.url}`, {
+      status: response.status,
+      body: errorText,
+    });
+    throw new Error(
+      `Cockpit: Error accessing ${response.url} (${String(response.status)}): ${errorText}`,
+    );
+  };
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error(`Cockpit: Error accessing ${response.url}`, {
-        status: response.status,
-        body: errorText,
-      });
-      throw new Error(
-        `Cockpit: Error accessing ${response.url} (${String(response.status)}): ${errorText}`,
-      );
-    }
+  const handleJsonResponse = async <T>(
+    response: Response,
+  ): Promise<T | null> => {
+    if (response.status === 404) return null;
+    if (!response.ok) return handleErrorResponse(response);
 
     const json = await response.json();
     return transformer.transform(json) as T;
   };
 
-  const fetchData = async <T>(
+  const handleTextResponse = async (
+    response: Response,
+  ): Promise<string | null> => {
+    if (response.status === 404) return null;
+    if (!response.ok) return handleErrorResponse(response);
+
+    return response.text();
+  };
+
+  const doFetch = async (
     url: URL | string,
     options: HttpFetchOptions = {},
-  ): Promise<T | null> => {
+  ): Promise<Response> => {
     const { useAdminAccess, ...fetchOptions } = options;
     logger.debug(`Cockpit: Requesting ${String(url)}`);
-    const response = await fetch(url, {
+    return fetch(url, {
       ...fetchOptions,
       headers: buildHeaders(
         fetchOptions.headers as Record<string, string>,
         useAdminAccess,
       ),
     });
-    return handleResponse<T>(response);
+  };
+
+  const fetchData = async <T>(
+    url: URL | string,
+    options: HttpFetchOptions = {},
+  ): Promise<T | null> => {
+    const response = await doFetch(url, options);
+    return handleJsonResponse<T>(response);
+  };
+
+  const fetchTextData = async (
+    url: URL | string,
+    options: HttpFetchOptions = {},
+  ): Promise<string | null> => {
+    const response = await doFetch(url, options);
+    return handleTextResponse(response);
   };
 
   return {
     fetch: fetchData,
+    fetchText: fetchTextData,
 
     async post<T>(
       url: URL | string,

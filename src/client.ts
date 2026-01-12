@@ -39,6 +39,7 @@ import {
 import {
   createAssetMethods,
   type ImageAssetQueryParams,
+  type CockpitAsset,
 } from "./methods/assets.ts";
 import { createGraphQLMethods } from "./methods/graphql.ts";
 import {
@@ -125,11 +126,21 @@ export interface CockpitAPIClient {
   ): Promise<T | null>;
 
   // Assets
-  assetById<T = unknown>(assetId: string): Promise<T | null>;
-  imageAssetById<T = unknown>(
+  assetById<T = CockpitAsset>(assetId: string): Promise<T | null>;
+  /**
+   * Get a transformed image asset URL.
+   *
+   * **Important:** The `w` (width) or `h` (height) parameter is required by the API.
+   * Without it, the API returns a 400 error.
+   *
+   * @param assetId - The asset ID
+   * @param queryParams - Image transformation parameters (w or h required)
+   * @returns URL string to the generated image, or null if not found
+   */
+  imageAssetById(
     assetId: string,
     queryParams?: ImageAssetQueryParams,
-  ): Promise<T | null>;
+  ): Promise<string | null>;
 
   // Utility
   getFullRouteForSlug(slug: string): Promise<string | undefined>;
