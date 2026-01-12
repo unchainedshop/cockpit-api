@@ -74,22 +74,17 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
   }
 
   const endpoint = new URL(endpointStr);
+  const apiKey = resolveApiKey(options.tenant, options);
 
-  const config: CockpitConfig = {
+  // Build config object with all properties before freezing
+  const config: CockpitConfig = Object.freeze({
     endpoint,
     useAdminAccess: options.useAdminAccess ?? false,
     defaultLanguage: options.defaultLanguage ?? "de",
     cachePrefix: `${endpointStr}:${options.tenant ?? "default"}:`,
-  };
+    ...(options.tenant !== undefined && { tenant: options.tenant }),
+    ...(apiKey !== undefined && { apiKey }),
+  });
 
-  if (options.tenant !== undefined) {
-    (config as { tenant: string }).tenant = options.tenant;
-  }
-
-  const apiKey = resolveApiKey(options.tenant, options);
-  if (apiKey !== undefined) {
-    (config as { apiKey: string }).apiKey = apiKey;
-  }
-
-  return Object.freeze(config);
+  return config;
 }

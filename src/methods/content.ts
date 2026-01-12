@@ -5,6 +5,7 @@
 import type { HttpClient } from "../core/http.ts";
 import type { UrlBuilder } from "../core/url-builder.ts";
 import type { CacheManager } from "../core/cache.ts";
+import { requireParam, validatePathSegment } from "../core/validation.ts";
 
 // ============================================================================
 // Types
@@ -15,6 +16,7 @@ export interface MethodContext {
   readonly url: UrlBuilder;
   readonly cache: CacheManager;
   readonly endpoint: string;
+  readonly tenant?: string;
 }
 
 export interface ListQueryOptions {
@@ -80,34 +82,18 @@ export interface CockpitTreeNode<T = CockpitContentItem> {
 // Implementation
 // ============================================================================
 
-/** Valid path segment format: alphanumeric, hyphens, underscores only */
-const VALID_PATH_SEGMENT = /^[a-zA-Z0-9_-]+$/;
-
-const requireParam = (value: unknown, name: string): void => {
-  if (value === undefined || value === null || value === "")
-    throw new Error(`Cockpit: Please provide ${name}`);
-};
-
-const validatePathSegment = (value: string, name: string): void => {
-  if (!VALID_PATH_SEGMENT.test(value)) {
-    throw new Error(
-      `Cockpit: Invalid ${name} format (only alphanumeric, hyphens, and underscores allowed)`,
-    );
-  }
-};
-
 export interface ContentMethods {
   getContentItem<T = unknown>(
     options: ContentItemQueryOptions,
   ): Promise<T | null>;
-  getContentItems<T = unknown>(
+  getContentItems<T = CockpitContentItem>(
     model: string,
     options?: ContentListQueryOptions,
-  ): Promise<T | null>;
-  getContentTree<T = unknown>(
+  ): Promise<T[] | null>;
+  getContentTree<T = CockpitContentItem>(
     model: string,
     options?: TreeQueryOptions,
-  ): Promise<T | null>;
+  ): Promise<CockpitTreeNode<T>[] | null>;
   getAggregateModel<T = unknown>(
     options: AggregateQueryOptions,
   ): Promise<T | null>;
@@ -148,10 +134,10 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
       return ctx.http.fetch<T>(url, buildFetchOptions(useAdminAccess));
     },
 
-    async getContentItems<T = unknown>(
+    async getContentItems<T = CockpitContentItem>(
       model: string,
       options: ContentListQueryOptions = {},
-    ): Promise<T | null> {
+    ): Promise<T[] | null> {
       requireParam(model, "a model");
       validatePathSegment(model, "model");
       const {
@@ -177,13 +163,13 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
           populate,
         },
       });
-      return ctx.http.fetch<T>(url, buildFetchOptions(useAdminAccess));
+      return ctx.http.fetch<T[]>(url, buildFetchOptions(useAdminAccess));
     },
 
-    async getContentTree<T = unknown>(
+    async getContentTree<T = CockpitContentItem>(
       model: string,
       options: TreeQueryOptions = {},
-    ): Promise<T | null> {
+    ): Promise<CockpitTreeNode<T>[] | null> {
       requireParam(model, "a model");
       validatePathSegment(model, "model");
       const {
@@ -205,7 +191,10 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
           populate,
         },
       });
-      return ctx.http.fetch<T>(url, buildFetchOptions(useAdminAccess));
+      return ctx.http.fetch<CockpitTreeNode<T>[]>(
+        url,
+        buildFetchOptions(useAdminAccess),
+      );
     },
 
     async getAggregateModel<T = unknown>(

@@ -47,10 +47,10 @@ export interface CockpitMenu {
 // ============================================================================
 
 export interface MenuMethods {
-  pagesMenus<T = unknown>(
+  pagesMenus<T = CockpitMenu>(
     options?: MenuQueryOptions | string,
-  ): Promise<T | null>;
-  pagesMenu<T = unknown>(
+  ): Promise<T[] | null>;
+  pagesMenu<T = CockpitMenu>(
     name: string,
     options?: MenuQueryOptions | string,
   ): Promise<T | null>;
@@ -58,19 +58,19 @@ export interface MenuMethods {
 
 export function createMenuMethods(ctx: MethodContext): MenuMethods {
   return {
-    async pagesMenus<T = unknown>(
+    async pagesMenus<T = CockpitMenu>(
       options: MenuQueryOptions | string = "default",
-    ): Promise<T | null> {
+    ): Promise<T[] | null> {
       const opts = typeof options === "string" ? { locale: options } : options;
       const { locale = "default", inactive } = opts;
       const url = ctx.url.build("/pages/menus", {
         locale,
         queryParams: { inactive },
       });
-      return ctx.http.fetch<T>(url);
+      return ctx.http.fetch<T[]>(url);
     },
 
-    async pagesMenu<T = unknown>(
+    async pagesMenu<T = CockpitMenu>(
       name: string,
       options: MenuQueryOptions | string = "default",
     ): Promise<T | null> {

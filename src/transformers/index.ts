@@ -10,3 +10,9 @@ export {
   FixImagePaths,
 } from "./image-path.ts";
 export { composeTransformers } from "./compose.ts";
+export {
+  createAssetPathTransformer,
+  transformAssetPaths,
+  type AssetPathConfig,
+} from "./asset-path.ts";
+export { createPageLinkTransformer, transformPageLinks } from "./page-link.ts";

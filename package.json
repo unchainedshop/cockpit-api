@@ -42,7 +42,13 @@
     "api"
   ],
   "author": "Mikael Araya",
-  "license": "ISC",
+  "contributors": [
+    "Pascal Kaufmann"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@unchainedshop/logger": "^4.6.0",
     "lru-cache": "^11.2.4"

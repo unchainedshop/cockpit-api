@@ -4,6 +4,7 @@
 
 import type { CockpitConfig } from "./config.ts";
 import { buildQueryString } from "./query-string.ts";
+import { createLocaleNormalizer } from "./locale.ts";
 
 export interface UrlBuildOptions {
   locale?: string;
@@ -21,15 +22,6 @@ export interface UrlBuilder {
    */
   graphqlEndpoint(): URL;
 }
-
-/**
- * Creates a locale normalizer for the given default language
- */
-const createLocaleNormalizer = (defaultLanguage: string) => {
-  return (locale: string): string => {
-    return locale === defaultLanguage ? "default" : locale;
-  };
-};
 
 /**
  * Creates a URL builder for the given configuration

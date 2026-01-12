@@ -4,6 +4,7 @@
 
 import type { MethodContext, ContentListQueryOptions } from "./content.ts";
 import type { CockpitAsset } from "./assets.ts";
+import { requireParam } from "../core/validation.ts";
 
 // ============================================================================
 // Types
@@ -61,15 +62,12 @@ export interface CockpitPage extends CockpitPageMeta {
 // Implementation
 // ============================================================================
 
-const requireParam = (value: unknown, name: string): void => {
-  if (value === undefined || value === null || value === "")
-    throw new Error(`Cockpit: Please provide ${name}`);
-};
-
 export interface PagesMethods {
-  pages<T = unknown>(options?: ContentListQueryOptions): Promise<T | null>;
-  pageById<T = unknown>(options: PageQueryOptions): Promise<T | null>;
-  pageByRoute<T = unknown>(
+  pages<T = CockpitPage>(
+    options?: ContentListQueryOptions,
+  ): Promise<T[] | null>;
+  pageById<T = CockpitPage>(options: PageQueryOptions): Promise<T | null>;
+  pageByRoute<T = CockpitPage>(
     route: string,
     options?: PageByRouteOptions | string,
   ): Promise<T | null>;
@@ -77,9 +75,9 @@ export interface PagesMethods {
 
 export function createPagesMethods(ctx: MethodContext): PagesMethods {
   return {
-    async pages<T = unknown>(
+    async pages<T = CockpitPage>(
       options: ContentListQueryOptions = {},
-    ): Promise<T | null> {
+    ): Promise<T[] | null> {
       const {
         locale = "default",
         limit,
@@ -93,10 +91,12 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
         locale,
         queryParams: { ...queryParams, limit, skip, sort, filter, fields },
       });
-      return ctx.http.fetch<T>(url);
+      return ctx.http.fetch<T[]>(url);
     },
 
-    async pageById<T = unknown>(options: PageQueryOptions): Promise<T | null> {
+    async pageById<T = CockpitPage>(
+      options: PageQueryOptions,
+    ): Promise<T | null> {
       const {
         page,
         id,
@@ -113,7 +113,7 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
       return ctx.http.fetch<T>(url);
     },
 
-    async pageByRoute<T = unknown>(
+    async pageByRoute<T = CockpitPage>(
       route: string,
       options: PageByRouteOptions | string = "default",
     ): Promise<T | null> {

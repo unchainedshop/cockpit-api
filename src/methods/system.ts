@@ -3,7 +3,6 @@
  */
 
 import type { MethodContext } from "./content.ts";
-import type { CacheManager } from "../core/cache.ts";
 
 // ============================================================================
 // Types
@@ -25,10 +24,7 @@ export interface SystemMethods {
   clearCache(pattern?: string): void;
 }
 
-export function createSystemMethods(
-  ctx: MethodContext,
-  cache: CacheManager,
-): SystemMethods {
+export function createSystemMethods(ctx: MethodContext): SystemMethods {
   return {
     async healthCheck<T = unknown>(): Promise<T | null> {
       const url = ctx.url.build("/system/healthcheck");
@@ -36,7 +32,7 @@ export function createSystemMethods(
     },
 
     clearCache(pattern?: string): void {
-      cache.clear(pattern);
+      ctx.cache.clear(pattern);
     },
   };
 }

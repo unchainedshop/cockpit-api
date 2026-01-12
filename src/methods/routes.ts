@@ -54,28 +54,29 @@ export interface CockpitSettings {
 // ============================================================================
 
 export interface RouteMethods {
-  pagesRoutes<T = unknown>(locale?: string): Promise<T | null>;
-  pagesSitemap<T = unknown>(): Promise<T | null>;
-  pagesSetting<T = unknown>(locale?: string): Promise<T | null>;
+  pagesRoutes<T = CockpitRoutesResponse>(locale?: string): Promise<T | null>;
+  pagesSitemap<T = CockpitSitemapEntry>(): Promise<T[] | null>;
+  pagesSetting<T = CockpitSettings>(locale?: string): Promise<T | null>;
   getFullRouteForSlug(slug: string): Promise<string | undefined>;
 }
 
-export function createRouteMethods(
-  ctx: MethodContext,
-  tenant?: string,
-): RouteMethods {
+export function createRouteMethods(ctx: MethodContext): RouteMethods {
   return {
-    async pagesRoutes<T = unknown>(locale = "default"): Promise<T | null> {
+    async pagesRoutes<T = CockpitRoutesResponse>(
+      locale = "default",
+    ): Promise<T | null> {
       const url = ctx.url.build("/pages/routes", { locale });
       return ctx.http.fetch<T>(url);
     },
 
-    async pagesSitemap<T = unknown>(): Promise<T | null> {
+    async pagesSitemap<T = CockpitSitemapEntry>(): Promise<T[] | null> {
       const url = ctx.url.build("/pages/sitemap");
-      return ctx.http.fetch<T>(url);
+      return ctx.http.fetch<T[]>(url);
     },
 
-    async pagesSetting<T = unknown>(locale = "default"): Promise<T | null> {
+    async pagesSetting<T = CockpitSettings>(
+      locale = "default",
+    ): Promise<T | null> {
       const url = ctx.url.build("/pages/settings", { locale });
       return ctx.http.fetch<T>(url);
     },
@@ -83,7 +84,7 @@ export function createRouteMethods(
     async getFullRouteForSlug(slug: string): Promise<string | undefined> {
       const routeSlugMap = await generateCollectionAndSingletonSlugRouteMap(
         ctx.endpoint,
-        tenant,
+        ctx.tenant,
         ctx.cache,
       );
       return routeSlugMap[slug];

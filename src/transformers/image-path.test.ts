@@ -2,6 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { TEST_ENDPOINT } from '../__tests__/test-helpers.ts';
 import { FixImagePaths, identityTransformer } from './image-path.ts';
+import { createAssetPathTransformer } from './asset-path.ts';
+import { createPageLinkTransformer } from './page-link.ts';
 
 describe('FixImagePaths', () => {
   describe('transformResult', () => {
@@ -159,5 +161,89 @@ describe('identityTransformer', () => {
     const input = { foo: 'bar', num: 42 };
     const result = identityTransformer.transform(input);
     assert.strictEqual(result, input);
+  });
+});
+
+describe('createAssetPathTransformer', () => {
+  it('fixes asset paths in responses', () => {
+    const transformer = createAssetPathTransformer({
+      baseUrl: 'https://test.cockpit.com',
+    });
+    const input = { image: { path: '/uploads/image.jpg' } };
+    const result = transformer.transform(input);
+    assert.ok(result.image.path.includes('https://test.cockpit.com'));
+    assert.ok(result.image.path.includes('storage/uploads'));
+  });
+
+  it('includes tenant in URL when provided', () => {
+    const transformer = createAssetPathTransformer({
+      baseUrl: 'https://test.cockpit.com',
+      tenant: 'mytenant',
+    });
+    const input = { image: { path: '/uploads/image.jpg' } };
+    const result = transformer.transform(input);
+    assert.ok(result.image.path.includes(':mytenant'));
+  });
+
+  it('fixes src attribute paths', () => {
+    const transformer = createAssetPathTransformer({
+      baseUrl: 'https://test.cockpit.com',
+    });
+    const input = { html: '<img src="/storage/uploads/image.jpg" />' };
+    const result = transformer.transform(input);
+    assert.strictEqual(
+      result.html,
+      '<img src="https://test.cockpit.com/storage/uploads/image.jpg" />',
+    );
+  });
+
+  it('returns original on JSON parse error', () => {
+    const transformer = createAssetPathTransformer({
+      baseUrl: 'https://test.cockpit.com',
+    });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const result = transformer.transform(circular);
+    assert.strictEqual(result, circular);
+  });
+});
+
+describe('createPageLinkTransformer', () => {
+  it('replaces page links with actual routes', () => {
+    const transformer = createPageLinkTransformer({
+      'pages://abc123': '/about',
+      'pages://def456': '/contact',
+    });
+    const input = { link: 'pages://abc123', other: 'pages://def456' };
+    const result = transformer.transform(input);
+    assert.strictEqual(result.link, '/about');
+    assert.strictEqual(result.other, '/contact');
+  });
+
+  it('returns input unchanged when no replacements', () => {
+    const transformer = createPageLinkTransformer({});
+    const input = { text: 'pages://unknown-id' };
+    const result = transformer.transform(input);
+    assert.strictEqual(result.text, 'pages://unknown-id');
+  });
+
+  it('handles multiple replacements in same string', () => {
+    const transformer = createPageLinkTransformer({
+      'pages://id1': '/page1',
+      'pages://id2': '/page2',
+    });
+    const input = { text: 'Link to pages://id1 and pages://id2' };
+    const result = transformer.transform(input);
+    assert.strictEqual(result.text, 'Link to /page1 and /page2');
+  });
+
+  it('returns original on JSON parse error', () => {
+    const transformer = createPageLinkTransformer({
+      'pages://id1': '/page1',
+    });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const result = transformer.transform(circular);
+    assert.strictEqual(result, circular);
   });
 });

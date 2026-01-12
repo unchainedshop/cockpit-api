@@ -43,19 +43,11 @@ export function createCacheManager(
     },
 
     clear(pattern?: string): void {
-      if (pattern !== undefined) {
-        const prefix = `${cachePrefix}${pattern}`;
-        for (const key of cache.keys()) {
-          if (key.startsWith(prefix)) {
-            cache.delete(key);
-          }
-        }
-      } else {
-        // Clear all entries for this prefix
-        for (const key of cache.keys()) {
-          if (key.startsWith(cachePrefix)) {
-            cache.delete(key);
-          }
+      const prefix =
+        pattern !== undefined ? `${cachePrefix}${pattern}` : cachePrefix;
+      for (const key of cache.keys()) {
+        if (key.startsWith(prefix)) {
+          cache.delete(key);
         }
       }
     },

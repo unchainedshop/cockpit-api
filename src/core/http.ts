@@ -36,6 +36,41 @@ export interface HttpClient {
 }
 
 /**
+ * Normalizes headers to Record<string, string>
+ */
+function normalizeHeaders(
+  headers: RequestInit["headers"],
+): Record<string, string> {
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    return {};
+  }
+  return headers as Record<string, string>;
+}
+
+/**
+ * Prepares request options for POST/DELETE requests
+ */
+function prepareJsonRequestOptions(
+  options: HttpFetchOptions,
+  method: string,
+  body?: unknown,
+): HttpFetchOptions {
+  const { useAdminAccess, headers, ...restOptions } = options;
+  const customHeaders = normalizeHeaders(headers);
+
+  const fetchOpts: HttpFetchOptions = {
+    ...restOptions,
+    method,
+    headers: { "Content-Type": "application/json", ...customHeaders },
+  };
+
+  if (body !== undefined) fetchOpts.body = JSON.stringify(body);
+  if (useAdminAccess !== undefined) fetchOpts.useAdminAccess = useAdminAccess;
+
+  return fetchOpts;
+}
+
+/**
  * Creates an HTTP client with authentication and response transformation
  */
 export function createHttpClient(
@@ -102,35 +137,17 @@ export function createHttpClient(
       body: unknown,
       options: HttpFetchOptions = {},
     ): Promise<T | null> {
-      const { useAdminAccess, headers, ...restOptions } = options;
-      const customHeaders =
-        headers && typeof headers === "object" && !Array.isArray(headers)
-          ? (headers as Record<string, string>)
-          : {};
-      const fetchOpts: HttpFetchOptions = {
-        ...restOptions,
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...customHeaders },
-        body: JSON.stringify(body),
-      };
-      if (useAdminAccess !== undefined)
-        fetchOpts.useAdminAccess = useAdminAccess;
-      return fetchData<T>(url, fetchOpts);
+      return fetchData<T>(
+        url,
+        prepareJsonRequestOptions(options, "POST", body),
+      );
     },
 
     async delete<T>(
       url: URL | string,
       options: HttpFetchOptions = {},
     ): Promise<T | null> {
-      const { useAdminAccess, ...restOptions } = options;
-      const fetchOpts: HttpFetchOptions = {
-        ...restOptions,
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      };
-      if (useAdminAccess !== undefined)
-        fetchOpts.useAdminAccess = useAdminAccess;
-      return fetchData<T>(url, fetchOpts);
+      return fetchData<T>(url, prepareJsonRequestOptions(options, "DELETE"));
     },
   };
 }

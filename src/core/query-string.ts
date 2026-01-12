@@ -2,7 +2,20 @@
  * Query string encoding utilities
  */
 
-type QueryParamValue = string | number | boolean | object | null | undefined;
+/** Primitive values that can be used as query parameters */
+export type QueryParamPrimitive = string | number | boolean | null | undefined;
+
+/** Object values that will be JSON stringified */
+export type QueryParamObject = Record<
+  string,
+  QueryParamPrimitive | QueryParamPrimitive[]
+>;
+
+/** All allowed query parameter value types */
+export type QueryParamValue =
+  | QueryParamPrimitive
+  | QueryParamObject
+  | QueryParamValue[];
 
 /**
  * Encodes a single query parameter key-value pair

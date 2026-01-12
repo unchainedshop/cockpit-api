@@ -1,6 +1,11 @@
 # Cockpit API
 
-A TypeScript client for interacting with Cockpit CMS, including GraphQL requests, content management, and schema stitching support.
+[![npm version](https://img.shields.io/npm/v/@unchainedshop/cockpit-api.svg)](https://www.npmjs.com/package/@unchainedshop/cockpit-api)
+[![CI](https://github.com/unchainedshop/cockpit-api/actions/workflows/ci.yml/badge.svg)](https://github.com/unchainedshop/cockpit-api/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org/)
+
+A TypeScript client for interacting with [Cockpit CMS](https://github.com/Cockpit-HQ/Cockpit), including GraphQL requests, content management, and schema stitching support.
 
 ## Installation
 

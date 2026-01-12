@@ -11,3 +11,5 @@ export type { UrlBuilder, UrlBuildOptions } from "./url-builder.ts";
 export { createUrlBuilder } from "./url-builder.ts";
 export type { HttpClient } from "./http.ts";
 export { createHttpClient } from "./http.ts";
+export { requireParam, validatePathSegment } from "./validation.ts";
+export { createLocaleNormalizer } from "./locale.ts";

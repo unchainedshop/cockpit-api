@@ -17,10 +17,25 @@ import {
   type ContentListQueryOptions,
   type TreeQueryOptions,
   type AggregateQueryOptions,
+  type CockpitContentItem,
+  type CockpitTreeNode,
 } from "./methods/content.ts";
-import { createPagesMethods, type PageQueryOptions } from "./methods/pages.ts";
-import { createMenuMethods, type MenuQueryOptions } from "./methods/menus.ts";
-import { createRouteMethods } from "./methods/routes.ts";
+import {
+  createPagesMethods,
+  type PageQueryOptions,
+  type CockpitPage,
+} from "./methods/pages.ts";
+import {
+  createMenuMethods,
+  type MenuQueryOptions,
+  type CockpitMenu,
+} from "./methods/menus.ts";
+import {
+  createRouteMethods,
+  type CockpitRoutesResponse,
+  type CockpitSitemapEntry,
+  type CockpitSettings,
+} from "./methods/routes.ts";
 import {
   createAssetMethods,
   type ImageAssetQueryParams,
@@ -51,14 +66,14 @@ export interface CockpitAPIClient {
   getContentItem<T = unknown>(
     options: ContentItemQueryOptions,
   ): Promise<T | null>;
-  getContentItems<T = unknown>(
+  getContentItems<T = CockpitContentItem>(
     model: string,
     options?: ContentListQueryOptions,
-  ): Promise<T | null>;
-  getContentTree<T = unknown>(
+  ): Promise<T[] | null>;
+  getContentTree<T = CockpitContentItem>(
     model: string,
     options?: TreeQueryOptions,
-  ): Promise<T | null>;
+  ): Promise<CockpitTreeNode<T>[] | null>;
   getAggregateModel<T = unknown>(
     options: AggregateQueryOptions,
   ): Promise<T | null>;
@@ -69,26 +84,28 @@ export interface CockpitAPIClient {
   deleteContentItem<T = unknown>(model: string, id: string): Promise<T | null>;
 
   // Pages API
-  pages<T = unknown>(options?: ContentListQueryOptions): Promise<T | null>;
-  pageById<T = unknown>(options: PageQueryOptions): Promise<T | null>;
-  pageByRoute<T = unknown>(
+  pages<T = CockpitPage>(
+    options?: ContentListQueryOptions,
+  ): Promise<T[] | null>;
+  pageById<T = CockpitPage>(options: PageQueryOptions): Promise<T | null>;
+  pageByRoute<T = CockpitPage>(
     route: string,
     options?: { locale?: string; populate?: number } | string,
   ): Promise<T | null>;
 
   // Menu API
-  pagesMenus<T = unknown>(
+  pagesMenus<T = CockpitMenu>(
     options?: MenuQueryOptions | string,
-  ): Promise<T | null>;
-  pagesMenu<T = unknown>(
+  ): Promise<T[] | null>;
+  pagesMenu<T = CockpitMenu>(
     name: string,
     options?: MenuQueryOptions | string,
   ): Promise<T | null>;
 
   // Routes & Sitemap
-  pagesRoutes<T = unknown>(locale?: string): Promise<T | null>;
-  pagesSitemap<T = unknown>(): Promise<T | null>;
-  pagesSetting<T = unknown>(locale?: string): Promise<T | null>;
+  pagesRoutes<T = CockpitRoutesResponse>(locale?: string): Promise<T | null>;
+  pagesSitemap<T = CockpitSitemapEntry>(): Promise<T[] | null>;
+  pagesSetting<T = CockpitSettings>(locale?: string): Promise<T | null>;
 
   // Search (Detektivo addon)
   search<T = CockpitSearchResult>(
@@ -192,18 +209,19 @@ export async function CockpitAPI(
     url: urlBuilder,
     cache,
     endpoint: endpointString,
+    ...(options.tenant !== undefined && { tenant: options.tenant }),
   };
 
   // Create method groups
   const contentMethods = createContentMethods(ctx);
   const pagesMethods = createPagesMethods(ctx);
   const menuMethods = createMenuMethods(ctx);
-  const routeMethods = createRouteMethods(ctx, options.tenant);
+  const routeMethods = createRouteMethods(ctx);
   const assetMethods = createAssetMethods(ctx);
-  const graphqlMethods = createGraphQLMethods(ctx, urlBuilder);
+  const graphqlMethods = createGraphQLMethods(ctx);
   const searchMethods = createSearchMethods(ctx);
   const localizeMethods = createLocalizeMethods(ctx);
-  const systemMethods = createSystemMethods(ctx, cache);
+  const systemMethods = createSystemMethods(ctx);
 
   // Compose the client
   return {

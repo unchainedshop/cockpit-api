@@ -9,6 +9,10 @@
  * - Minimal memory footprint
  */
 
+import { createLocaleNormalizer } from "../core/locale.ts";
+import type { CockpitPage } from "../methods/pages.ts";
+import type { CockpitContentItem } from "../methods/content.ts";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -63,23 +67,23 @@ export interface PageFetchParams {
  */
 export interface FetchClient {
   /** Fetch a page by route */
-  pageByRoute<T = unknown>(
+  pageByRoute<T = CockpitPage>(
     route: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
   /** Fetch pages list */
-  pages<T = unknown>(params?: PageFetchParams): Promise<T | null>;
+  pages<T = CockpitPage>(params?: PageFetchParams): Promise<T[] | null>;
   /** Fetch a page by ID */
-  pageById<T = unknown>(
+  pageById<T = CockpitPage>(
     page: string,
     id: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
   /** Fetch content items */
-  getContentItems<T = unknown>(
+  getContentItems<T = CockpitContentItem>(
     model: string,
     params?: PageFetchParams,
-  ): Promise<T | null>;
+  ): Promise<T[] | null>;
   /** Fetch a single content item */
   getContentItem<T = unknown>(
     model: string,
@@ -96,18 +100,6 @@ export interface FetchClient {
 // ============================================================================
 // Implementation
 // ============================================================================
-
-/**
- * Creates a locale normalizer for the given default language
- */
-function createLocaleNormalizer(
-  defaultLanguage: string,
-): (locale?: string) => string {
-  return (locale?: string): string => {
-    if (locale === undefined || locale === defaultLanguage) return "default";
-    return locale;
-  };
-}
 
 /**
  * Build the API base URL for the given endpoint and tenant
@@ -211,7 +203,7 @@ export function createFetchClient(
     /**
      * Fetch a page by route
      */
-    async pageByRoute<T = unknown>(
+    async pageByRoute<T = CockpitPage>(
       route: string,
       params: PageFetchParams = {},
     ): Promise<T | null> {
@@ -227,9 +219,11 @@ export function createFetchClient(
     /**
      * Fetch pages list
      */
-    async pages<T = unknown>(params: PageFetchParams = {}): Promise<T | null> {
+    async pages<T = CockpitPage>(
+      params: PageFetchParams = {},
+    ): Promise<T[] | null> {
       const { locale, ...rest } = params;
-      return fetchRaw<T>("/pages/pages", {
+      return fetchRaw<T[]>("/pages/pages", {
         locale: normalizeLocale(locale),
         ...rest,
       });
@@ -238,7 +232,7 @@ export function createFetchClient(
     /**
      * Fetch a page by ID
      */
-    async pageById<T = unknown>(
+    async pageById<T = CockpitPage>(
       page: string,
       id: string,
       params: PageFetchParams = {},
@@ -254,12 +248,12 @@ export function createFetchClient(
     /**
      * Fetch content items
      */
-    async getContentItems<T = unknown>(
+    async getContentItems<T = CockpitContentItem>(
       model: string,
       params: PageFetchParams = {},
-    ): Promise<T | null> {
+    ): Promise<T[] | null> {
       const { locale, ...rest } = params;
-      return fetchRaw<T>(`/content/items/${model}`, {
+      return fetchRaw<T[]>(`/content/items/${model}`, {
         locale: normalizeLocale(locale),
         ...rest,
       });

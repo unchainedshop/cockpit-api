@@ -3,6 +3,7 @@
  */
 
 import type { MethodContext } from "./content.ts";
+import { requireParam } from "../core/validation.ts";
 
 // ============================================================================
 // Types
@@ -31,11 +32,6 @@ export interface CockpitSearchResult {
 // ============================================================================
 // Implementation
 // ============================================================================
-
-const requireParam = (value: unknown, name: string): void => {
-  if (value === undefined || value === null || value === "")
-    throw new Error(`Cockpit: Please provide ${name}`);
-};
 
 export interface SearchMethods {
   search<T = CockpitSearchResult>(
