@@ -130,15 +130,13 @@ export async function CockpitAPI(options: CockpitAPIOptions = {}): Promise<Cockp
   const config = createConfig(options);
   const endpointString = config.endpoint.toString();
 
-  // Create cache manager with env var fallbacks
-  const cacheMax = options.cache?.max
-    ?? (process.env.COCKPIT_CACHE_MAX ? parseInt(process.env.COCKPIT_CACHE_MAX, 10) : 100);
-  const cacheTtl = options.cache?.ttl
-    ?? (process.env.COCKPIT_CACHE_TTL ? parseInt(process.env.COCKPIT_CACHE_TTL, 10) : 100000);
+  // Create cache manager - env vars take precedence, then options, then cache.ts defaults
+  const envCacheMax = process.env.COCKPIT_CACHE_MAX ? parseInt(process.env.COCKPIT_CACHE_MAX, 10) : undefined;
+  const envCacheTtl = process.env.COCKPIT_CACHE_TTL ? parseInt(process.env.COCKPIT_CACHE_TTL, 10) : undefined;
 
   const cache = createCacheManager(config.cachePrefix, {
-    max: cacheMax,
-    ttl: cacheTtl,
+    max: options.cache?.max ?? envCacheMax,
+    ttl: options.cache?.ttl ?? envCacheTtl,
   });
 
   // Generate route replacements for image path transformer

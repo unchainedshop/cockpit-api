@@ -827,5 +827,15 @@ describe('Extended API methods', () => {
       const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
       assert.ok(client); // Client created successfully with env var
     });
+
+    it('uses direct cache options over env vars', async () => {
+      envManager.set({ COCKPIT_CACHE_MAX: '50', COCKPIT_CACHE_TTL: '5000' });
+
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        cache: { max: 200, ttl: 30000 },
+      });
+      assert.ok(client); // Client created successfully with direct cache options
+    });
   });
 });

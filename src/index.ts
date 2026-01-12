@@ -11,7 +11,16 @@ export type { CockpitAPIOptions } from "./core/config.ts";
 export type { CacheManager, CacheOptions } from "./core/cache.ts";
 
 // Utility functions
-export { getTenantIds } from "./utils/tenant.ts";
+export {
+  getTenantIds,
+  resolveTenantFromUrl,
+  resolveTenantFromSubdomain,
+} from "./utils/tenant.ts";
+export type {
+  TenantUrlResult,
+  ResolveTenantFromUrlOptions,
+  ResolveTenantFromSubdomainOptions,
+} from "./utils/tenant.ts";
 export {
   generateCmsRouteReplacements,
   generateCollectionAndSingletonSlugRouteMap,

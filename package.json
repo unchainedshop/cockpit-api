@@ -1,10 +1,24 @@
 {
   "name": "@unchainedshop/cockpit-api",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A package to interact with the Cockpit CMS API, including functionalities to handle GraphQL requests and various CMS content manipulations.",
   "main": "dist/index.js",
   "homepage": "https://unchained.shop",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.js"
+    },
+    "./fetch": {
+      "types": "./dist/fetch/index.d.ts",
+      "import": "./dist/fetch/index.js"
+    }
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org"
   },
@@ -33,6 +47,14 @@
     "lru-cache": "^11.2.4"
   },
   "types": "dist/index.d.ts",
+  "peerDependencies": {
+    "@graphql-tools/wrap": "^8.0.0 || ^9.0.0 || ^10.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@graphql-tools/wrap": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^24.10.7",
     "typescript": "^5.9.3"
