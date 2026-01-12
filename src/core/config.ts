@@ -58,26 +58,29 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
     );
   }
 
+  // Normalize empty string tenant to undefined
+  const tenant =
+    options.tenant === undefined || options.tenant === ""
+      ? undefined
+      : options.tenant;
+
   // Validate tenant format to prevent path traversal
-  if (
-    options.tenant !== undefined &&
-    !VALID_TENANT_PATTERN.test(options.tenant)
-  ) {
+  if (tenant !== undefined && !VALID_TENANT_PATTERN.test(tenant)) {
     throw new Error(
       "Cockpit: Invalid tenant format (only alphanumeric, hyphens, and underscores allowed)",
     );
   }
 
   const endpoint = new URL(endpointStr);
-  const apiKey = resolveApiKey(options.tenant, options);
+  const apiKey = resolveApiKey(tenant, options);
 
   // Build config object with all properties before freezing
   const config: CockpitConfig = Object.freeze({
     endpoint,
     useAdminAccess: options.useAdminAccess ?? false,
     defaultLanguage: options.defaultLanguage ?? null,
-    cachePrefix: `${endpointStr}:${options.tenant ?? "default"}:`,
-    ...(options.tenant !== undefined && { tenant: options.tenant }),
+    cachePrefix: `${endpointStr}:${tenant ?? "default"}:`,
+    ...(tenant !== undefined && { tenant }),
     ...(apiKey !== undefined && { apiKey }),
   });
 

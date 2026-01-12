@@ -36,10 +36,10 @@ export interface MakeCockpitSchemaOptions {
     context: CockpitExecutorContext | undefined,
   ) => string | undefined;
 
-  /** CockpitAPI options to pass through (endpoint, apiKey, useAdminAccess) */
+  /** CockpitAPI options to pass through (endpoint, apiKey, useAdminAccess, preloadRoutes) */
   cockpitOptions?: Pick<
     CockpitAPIOptions,
-    "endpoint" | "apiKey" | "useAdminAccess"
+    "endpoint" | "apiKey" | "useAdminAccess" | "preloadRoutes"
   >;
 
   /** Maximum number of clients to keep in the pool (default: 100) */
@@ -127,7 +127,11 @@ export function createRemoteExecutor(
     if (pending) return pending;
 
     // Create new client and cache it
-    const clientOpts: Parameters<typeof CockpitAPI>[0] = { ...cockpitOptions };
+    // Default preloadRoutes to true for page link resolution in GraphQL responses
+    const clientOpts: Parameters<typeof CockpitAPI>[0] = {
+      preloadRoutes: true,
+      ...cockpitOptions,
+    };
     if (tenant !== undefined) clientOpts.tenant = tenant;
     const clientPromise = CockpitAPI(clientOpts);
 

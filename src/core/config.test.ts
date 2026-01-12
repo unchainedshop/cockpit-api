@@ -98,6 +98,14 @@ describe("createConfig", () => {
       });
       assert.strictEqual(config.tenant, undefined);
     });
+
+    it("normalizes empty string tenant to undefined", () => {
+      const config = createConfig({
+        endpoint: "https://example.com/api",
+        tenant: "",
+      });
+      assert.strictEqual(config.tenant, undefined);
+    });
   });
 
   describe("API key configuration", () => {
