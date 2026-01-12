@@ -1,26 +1,9 @@
-import type { Logger } from "@unchainedshop/logger";
+/**
+ * Logger for Cockpit API
+ */
 
-let logger: Logger = { // eslint-disable-line
-  info: console.log,
-  error: console.error,
-  warn: console.warn,
-  debug: console.debug,
-  trace: console.trace,
-};
+import { createLogger } from "@unchainedshop/logger";
 
-async function loadLogger() {
-  try {
-    const { createLogger } = await import("@unchainedshop/logger");
-    logger = createLogger("cockpit") || logger;
-  } catch (e) {
-    // console.warn(e);
-  }
-}
+export const logger = createLogger("cockpit");
 
-loadLogger();
-
-const log = logger.info;
-
-export { logger };
-
-export default log;
+export default logger.info;

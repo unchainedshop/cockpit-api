@@ -1,9 +1,8 @@
 # Cockpit API
 
-A package to interact with the Cockpit CMS API, including functionalities to handle GraphQL requests and various CMS content manipulations.
-## Installation
+A TypeScript client for interacting with Cockpit CMS, including GraphQL requests and content management.
 
-Install the package via npm:
+## Installation
 
 ```sh
 npm install --save @unchainedshop/cockpit-api
@@ -13,24 +12,21 @@ npm install --save @unchainedshop/cockpit-api
 
 ### Initialization
 
-First, set your cockpit graphql endpoint to env
-
-```bash
-COCKPIT_GRAPHQL_ENDPOINT
-```
-then import and initialize the API:
-
-```javascript
+```typescript
 import { CockpitAPI } from '@unchainedshop/cockpit-api';
 
-const cockpit = await CockpitAPI();
+// With explicit endpoint
+const cockpit = await CockpitAPI({
+  endpoint: 'https://your-cockpit-instance.com/api/graphql',
+});
+
+// Or using environment variables
+const cockpit = await CockpitAPI();  // Uses COCKPIT_GRAPHQL_ENDPOINT
 ```
 
 ### GraphQL Requests
 
-You can make GraphQL requests using the `graphQL` method:
-
-```javascript
+```typescript
 import { gql } from 'graphql-tag';
 
 const query = gql`
@@ -43,67 +39,129 @@ const query = gql`
 `;
 
 const result = await cockpit.graphQL(query, {});
-console.log(result);
 ```
 
 ### Content Operations
 
-You can perform various content operations such as fetching items, aggregating models, and manipulating pages.
+```typescript
+// Get a single content item
+const post = await cockpit.getContentItem({ model: 'posts', id: '123' });
 
-Example to get a content item:
+// With locale and field selection
+const localizedPost = await cockpit.getContentItem({
+  model: 'posts',
+  id: '123',
+  locale: 'en',
+  queryParams: { fields: { title: 1, content: 1 } }
+});
 
-```javascript
-const contentItem = await cockpit.getContentItem({ model: 'posts', id: '123' });
-console.log(contentItem);
+// Get multiple content items with pagination
+const posts = await cockpit.getContentItems('posts', {
+  limit: 10,
+  skip: 0,
+  sort: { _created: -1 },
+  filter: { published: true }
+});
+
+// Get singleton content
+const settings = await cockpit.getSingleton('siteSettings', { locale: 'en' });
 ```
 
-### CockpitAPI
+### API Methods
 
-Provides various methods to interact with the Cockpit CMS.
+**Content:**
+- `getContentItem<T>({ model, id?, locale?, queryParams? })` - Get single content item
+- `getContentItems<T>(model, { limit?, skip?, sort?, filter?, fields?, populate?, locale? })` - List content items
+- `getContentTree<T>(model, { parent?, filter?, fields?, populate?, locale? })` - Get tree structure
+- `getAggregateModel<T>({ model, pipeline, locale? })` - Aggregation pipeline query
+- `getSingleton<T>(model, { locale?, populate? })` - Get singleton model
+- `postContentItem<T>(model, item)` - Create content item
+- `deleteContentItem<T>(model, id)` - Delete content item
 
-**Methods:**
-- `graphQL(document, variables)`
-- `getContentItem({ model, id }, locale, queryParams)`
-- `getAggregateModel({ model, pipeline }, locale)`
-- `getContentItems(model, locale, queryParams)`
-- `getContentTree(model, locale, queryParams)`
-- `postContentItem(model, item)`
-- `deleteContentItem(model, id)`
-- `pages(locale, queryParams)`
-- `pageById({ page, id }, locale, queryParams)`
-- `pageByRoute(route, locale)`
-- `pagesMenus(locale)`
-- `pagesMenu(name, locale)`
-- `pagesRoutes(locale)`
-- `pagesSitemap()`
-- `pagesSetting(locale)`
-- `healthCheck()`
-- `lokalize(projectName,locale, nested)`
-- `assetById(assetId)`
-- `imageAssetById(assetId, queryParams)`
-- `getFullRouteForSlug(slug)`
+**Pages:**
+- `pages<T>({ limit?, skip?, sort?, filter?, fields?, locale? })` - List pages
+- `pageById<T>({ page, id, locale?, populate? })` - Get page by ID
+- `pageByRoute<T>(route, { locale?, populate? })` - Get page by route
 
-### Optional configuration 
-you can change the caching behavior by setting the envs below
- 
+**Menus:**
+- `pagesMenus<T>({ locale?, inactive? })` - List all menus
+- `pagesMenu<T>(name, { locale?, inactive? })` - Get specific menu
+
+**Routes & Sitemap:**
+- `pagesRoutes<T>(locale?)` - Get all routes
+- `pagesSitemap<T>()` - Get sitemap
+- `pagesSetting<T>(locale?)` - Get site settings
+
+**Search (Detektivo addon):**
+- `search<T>({ index, q?, limit?, offset? })` - Full-text search
+
+**Localization (Lokalize addon):**
+- `localize<T>(projectName, { locale?, nested? })` - Get translations
+
+**Assets:**
+- `assetById<T>(assetId)` - Get asset metadata
+- `imageAssetById<T>(assetId, { m?, w?, h?, q?, mime? })` - Get transformed image
+
+**System:**
+- `graphQL<T>(document, variables?)` - Execute GraphQL query
+- `healthCheck<T>()` - Health check
+- `clearCache(pattern?)` - Clear cache
+- `getFullRouteForSlug(slug)` - Resolve slug to full route
+
+### Configuration Options
+
+All options fall back to environment variables when not explicitly provided:
+
+```typescript
+const cockpit = await CockpitAPI({
+  endpoint: 'https://...',      // Falls back to COCKPIT_GRAPHQL_ENDPOINT
+  tenant: 'mytenant',           // Optional: for multi-tenant setups
+  apiKey: 'your-api-key',       // Falls back to COCKPIT_SECRET env var
+  useAdminAccess: true,         // Optional: inject api-Key header
+  cache: {
+    max: 100,                   // Falls back to COCKPIT_CACHE_MAX (default: 100)
+    ttl: 100000,                // Falls back to COCKPIT_CACHE_TTL (default: 100000)
+  },
+});
+```
+
+### Environment Variables
+
 ```bash
-COCKPIT_CACHE__MAX_LIMIT # number of records to store in before overwriting it
-COCKPIT_CACHE_TTL # caching period in milliseconds
+COCKPIT_GRAPHQL_ENDPOINT=https://your-cockpit-instance.com/api/graphql
+COCKPIT_SECRET=your-api-key                # Default API key
+COCKPIT_SECRET_MYTENANT=tenant-api-key     # Tenant-specific API key
+COCKPIT_CACHE_MAX=100                      # Max cache entries (default: 100)
+COCKPIT_CACHE_TTL=100000                   # Cache TTL in ms (default: 100000)
 ```
+
+### TypeScript Support
+
+```typescript
+import type {
+  CockpitAPIClient,
+  CockpitAPIOptions,
+  ContentItemQueryOptions,
+  ContentListQueryOptions,
+  ImageAssetQueryParams,
+  CockpitPage,
+  CockpitAsset,
+} from '@unchainedshop/cockpit-api';
+
+import { ImageSizeMode, MimeType } from '@unchainedshop/cockpit-api';
+```
+
+## v2.0.0 Breaking Changes
+
+- `lokalize()` renamed to `localize()`
+- Methods use options objects instead of positional parameters
+- HTTP errors now throw instead of returning `null` (404 still returns `null`)
+- Each client instance has its own cache (no shared state)
 
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request.
 
-1. Fork the repository.
-2. Create a new branch: `git checkout -b feature-branch-name`.
-3. Make your changes and commit them: `git commit -m 'Add new feature'`.
-4. Push to the branch: `git push origin feature-branch-name`.
-5. Open a pull request.
-
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-```
-
-This `README.md` covers installation, basic usage, detailed API reference, contribution guidelines, and licensing information. Adjust the details as needed for your specific implementation.

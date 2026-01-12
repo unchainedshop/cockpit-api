@@ -6,6 +6,8 @@
     "allowSyntheticDefaultImports": true,
     "declaration": true,
     "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+    "rewriteRelativeImportExtensions": true,
     "forceConsistentCasingInFileNames": true,
     "lib": ["esnext"],
     "module": "NodeNext",
@@ -16,7 +18,8 @@
     "skipLibCheck": true,
     "target": "ESNext",
     "types": ["node"],
-    "baseUrl": "." // This must be specified if "paths" is.
+    "baseUrl": "."
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/__tests__"]
 }
