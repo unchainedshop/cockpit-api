@@ -71,7 +71,7 @@ export type {
   TreeQueryOptions,
   AggregateQueryOptions,
 } from "./methods/content.ts";
-export type { PageQueryOptions, PageByRouteOptions } from "./methods/pages.ts";
+export type { PageByIdOptions, PageByRouteOptions } from "./methods/pages.ts";
 export type { MenuQueryOptions } from "./methods/menus.ts";
 export type { SearchQueryOptions } from "./methods/search.ts";
 export type { LocalizeOptions } from "./methods/localize.ts";

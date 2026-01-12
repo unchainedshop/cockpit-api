@@ -193,12 +193,21 @@ describe("pageById", () => {
     mock.reset();
   });
 
-  it("constructs correct URL with page type and id", async () => {
+  it("constructs correct URL with id", async () => {
     const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pageById("article", "abc123");
+    await client.pageById("65a94b56f3c1b3ff040f00e5");
 
     const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("/pages/page/article/abc123"));
+    assert.ok(url.includes("/pages/page/65a94b56f3c1b3ff040f00e5"));
+  });
+
+  it("passes locale and populate options", async () => {
+    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
+    await client.pageById("page123", { locale: "en", populate: 2 });
+
+    const [url] = mockFetch.mock.calls[0].arguments;
+    assert.ok(url.includes("locale=en"));
+    assert.ok(url.includes("populate=2"));
   });
 });
 

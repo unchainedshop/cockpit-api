@@ -12,6 +12,8 @@ import { requireParam } from "../core/validation.ts";
 export interface SearchQueryOptions {
   index: string;
   q?: string;
+  /** Comma-separated list of fields to retrieve */
+  fields?: string;
   limit?: number;
   offset?: number;
 }
@@ -44,10 +46,10 @@ export function createSearchMethods(ctx: MethodContext): SearchMethods {
     async search<T = CockpitSearchResult>(
       options: SearchQueryOptions,
     ): Promise<T | null> {
-      const { index, q, limit, offset } = options;
+      const { index, q, fields, limit, offset } = options;
       requireParam(index, "a search index");
       const url = ctx.url.build(`/detektivo/search/${index}`, {
-        queryParams: { q, limit, offset },
+        queryParams: { q, fields, limit, offset },
       });
       return ctx.http.fetch<T>(url);
     },

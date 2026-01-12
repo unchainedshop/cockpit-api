@@ -22,7 +22,7 @@ import {
 } from "./methods/content.ts";
 import {
   createPagesMethods,
-  type PageQueryOptions,
+  type PageByIdOptions,
   type CockpitPage,
 } from "./methods/pages.ts";
 import {
@@ -76,7 +76,7 @@ export interface CockpitAPIClient {
   ): Promise<CockpitTreeNode<T>[] | null>;
   getAggregateModel<T = unknown>(
     options: AggregateQueryOptions,
-  ): Promise<T | null>;
+  ): Promise<T[] | null>;
   postContentItem<T = unknown>(
     model: string,
     item: Record<string, unknown>,
@@ -87,7 +87,10 @@ export interface CockpitAPIClient {
   pages<T = CockpitPage>(
     options?: ContentListQueryOptions,
   ): Promise<T[] | null>;
-  pageById<T = CockpitPage>(options: PageQueryOptions): Promise<T | null>;
+  pageById<T = CockpitPage>(
+    id: string,
+    options?: PageByIdOptions,
+  ): Promise<T | null>;
   pageByRoute<T = CockpitPage>(
     route: string,
     options?: { locale?: string; populate?: number } | string,

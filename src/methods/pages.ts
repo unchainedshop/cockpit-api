@@ -10,12 +10,9 @@ import { requireParam } from "../core/validation.ts";
 // Types
 // ============================================================================
 
-export interface PageQueryOptions {
-  page: string;
-  id: string;
+export interface PageByIdOptions {
   locale?: string;
   populate?: number;
-  queryParams?: Record<string, unknown>;
 }
 
 export interface PageByRouteOptions {
@@ -66,7 +63,10 @@ export interface PagesMethods {
   pages<T = CockpitPage>(
     options?: ContentListQueryOptions,
   ): Promise<T[] | null>;
-  pageById<T = CockpitPage>(options: PageQueryOptions): Promise<T | null>;
+  pageById<T = CockpitPage>(
+    id: string,
+    options?: PageByIdOptions,
+  ): Promise<T | null>;
   pageByRoute<T = CockpitPage>(
     route: string,
     options?: PageByRouteOptions | string,
@@ -95,20 +95,14 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
     },
 
     async pageById<T = CockpitPage>(
-      options: PageQueryOptions,
+      id: string,
+      options: PageByIdOptions = {},
     ): Promise<T | null> {
-      const {
-        page,
-        id,
-        locale = "default",
-        populate,
-        queryParams = {},
-      } = options;
-      requireParam(page, "a page");
-      requireParam(id, "a page and id");
-      const url = ctx.url.build(`/pages/page/${page}/${id}`, {
+      requireParam(id, "a page id");
+      const { locale = "default", populate } = options;
+      const url = ctx.url.build(`/pages/page/${id}`, {
         locale,
-        queryParams: { ...queryParams, populate },
+        queryParams: { populate },
       });
       return ctx.http.fetch<T>(url);
     },

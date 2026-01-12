@@ -75,7 +75,6 @@ export interface FetchClient {
   pages<T = CockpitPage>(params?: PageFetchParams): Promise<T[] | null>;
   /** Fetch a page by ID */
   pageById<T = CockpitPage>(
-    page: string,
     id: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
@@ -233,12 +232,11 @@ export function createFetchClient(
      * Fetch a page by ID
      */
     async pageById<T = CockpitPage>(
-      page: string,
       id: string,
       params: PageFetchParams = {},
     ): Promise<T | null> {
       const { locale, populate, ...rest } = params;
-      return fetchRaw<T>(`/pages/page/${page}/${id}`, {
+      return fetchRaw<T>(`/pages/page/${id}`, {
         locale: normalizeLocale(locale),
         populate,
         ...rest,

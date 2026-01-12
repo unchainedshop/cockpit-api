@@ -96,7 +96,7 @@ export interface ContentMethods {
   ): Promise<CockpitTreeNode<T>[] | null>;
   getAggregateModel<T = unknown>(
     options: AggregateQueryOptions,
-  ): Promise<T | null>;
+  ): Promise<T[] | null>;
   postContentItem<T = unknown>(
     model: string,
     item: Record<string, unknown>,
@@ -199,7 +199,7 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
 
     async getAggregateModel<T = unknown>(
       options: AggregateQueryOptions,
-    ): Promise<T | null> {
+    ): Promise<T[] | null> {
       const { model, pipeline, locale = "default" } = options;
       requireParam(model, "a model");
       validatePathSegment(model, "model");
@@ -207,7 +207,7 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
         locale,
         queryParams: { pipeline },
       });
-      return ctx.http.fetch<T>(url);
+      return ctx.http.fetch<T[]>(url);
     },
 
     async postContentItem<T = unknown>(

@@ -300,22 +300,39 @@ describe('CockpitAPI', () => {
   });
 
   describe('pageById', () => {
-    it('throws when page not provided', async () => {
-      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
-
-      await assertThrows(
-        () => client.pageById({ page: '', id: '123' }),
-        'Please provide a page'
-      );
-    });
-
     it('throws when id not provided', async () => {
       const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
 
       await assertThrows(
-        () => client.pageById({ page: 'home', id: '' }),
-        'Please provide a page'
+        () => client.pageById(''),
+        'Please provide a page id'
       );
+    });
+
+    it('constructs correct URL with id', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: { _id: '123' } }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.pageById('65a94b56f3c1b3ff040f00e5');
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      assert.ok(url.toString().includes('/pages/page/65a94b56f3c1b3ff040f00e5'));
+    });
+
+    it('passes locale and populate options', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: {} }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.pageById('page123', { locale: 'en', populate: 2 });
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      const urlStr = url.toString();
+      assert.ok(urlStr.includes('locale=en'));
+      assert.ok(urlStr.includes('populate=2'));
     });
   });
 
