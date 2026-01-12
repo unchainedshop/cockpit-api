@@ -6,10 +6,6 @@ import type { MethodContext, ContentListQueryOptions } from "./content.ts";
 import type { CockpitAsset } from "./assets.ts";
 import { requireParam } from "../core/validation.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface PageByIdOptions {
   locale?: string;
   populate?: number;
@@ -54,10 +50,6 @@ export interface CockpitPage extends CockpitPageMeta {
   layout?: CockpitLayoutBlock[];
   _p?: string;
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 export interface PagesMethods {
   pages<T = CockpitPage>(

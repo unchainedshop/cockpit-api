@@ -7,10 +7,6 @@ import type { CockpitAsset } from "./assets.ts";
 import type { CockpitPageType, CockpitPageSeo } from "./pages.ts";
 import { generateCollectionAndSingletonSlugRouteMap } from "../utils/route-map.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface CockpitRoute {
   route: string;
   slug: string;
@@ -48,10 +44,6 @@ export interface CockpitSettings {
   seo?: CockpitPageSeo;
   locales?: string[];
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 export interface RouteMethods {
   pagesRoutes<T = CockpitRoutesResponse>(locale?: string): Promise<T | null>;

@@ -7,10 +7,6 @@ import { LRUCache } from "lru-cache";
 import { CockpitAPI, type CockpitAPIClient } from "../client.ts";
 import type { CockpitAPIOptions } from "../core/config.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 /**
  * Context passed to the remote executor
  * Typically includes the request object for extracting tenant info
@@ -63,10 +59,6 @@ export interface ExecutorRequest {
  * Remote executor function type
  */
 export type RemoteExecutor = (request: ExecutorRequest) => Promise<unknown>;
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 /** Default max clients to keep in pool */
 const DEFAULT_MAX_CLIENTS = 100;

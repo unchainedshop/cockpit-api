@@ -10,10 +10,6 @@ import { logger } from "../cockpit-logger.ts";
 import { transformAssetPaths, type AssetPathConfig } from "./asset-path.ts";
 import { transformPageLinks } from "./page-link.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface ResponseTransformer {
   transform<T>(response: T): T;
 }

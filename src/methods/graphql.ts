@@ -5,10 +5,6 @@
 import { print, type DocumentNode } from "graphql";
 import type { MethodContext } from "./content.ts";
 
-// ============================================================================
-// Implementation
-// ============================================================================
-
 export interface GraphQLMethods {
   graphQL<T = unknown>(
     document: DocumentNode,

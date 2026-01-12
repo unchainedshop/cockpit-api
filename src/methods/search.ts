@@ -5,10 +5,6 @@
 import type { MethodContext } from "./content.ts";
 import { requireParam } from "../core/validation.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface SearchQueryOptions {
   index: string;
   q?: string;
@@ -30,10 +26,6 @@ export interface CockpitSearchResult {
   total: number;
   took: number;
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 export interface SearchMethods {
   search<T = CockpitSearchResult>(

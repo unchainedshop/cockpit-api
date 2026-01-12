@@ -4,20 +4,12 @@
 
 import type { MethodContext } from "./content.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface CockpitHealthCheck {
   status: "ok" | "error";
   message?: string;
   version?: string;
   timestamp?: string;
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 export interface SystemMethods {
   healthCheck<T = unknown>(): Promise<T | null>;

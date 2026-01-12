@@ -14,10 +14,6 @@ import assert from "node:assert";
 import { CockpitAPI, type CockpitAPIClient } from "../index.ts";
 import { createFetchClient, type FetchClient } from "../fetch/client.ts";
 
-// ============================================================================
-// Configuration
-// ============================================================================
-
 const TEST_ENDPOINT = process.env["COCKPIT_TEST_ENDPOINT"];
 const TEST_SECRET = process.env["COCKPIT_TEST_SECRET"];
 const TEST_TENANT = process.env["COCKPIT_TEST_TENANT"];
@@ -29,10 +25,6 @@ if (!TEST_ENDPOINT) {
   );
   process.exit(0);
 }
-
-// ============================================================================
-// Discovered Data Store
-// ============================================================================
 
 interface DiscoveredData {
   pageIds: string[];
@@ -53,10 +45,6 @@ const discovered: DiscoveredData = {
   locales: [],
   contentItemIds: new Map(),
 };
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 function extractAssetIds(obj: unknown): string[] {
   const ids: string[] = [];
@@ -96,10 +84,6 @@ function isImageAsset(asset: unknown): boolean {
   return mime.startsWith("image/");
 }
 
-// ============================================================================
-// Test Suite
-// ============================================================================
-
 describe("Cockpit API Integration Tests", () => {
   let client: CockpitAPIClient;
 
@@ -110,10 +94,6 @@ describe("Cockpit API Integration Tests", () => {
       useAdminAccess: Boolean(TEST_SECRET),
     });
   });
-
-  // ==========================================================================
-  // Discovery Phase - Run first to gather dynamic data
-  // ==========================================================================
 
   describe("Discovery Phase", () => {
     it("discovers pages and extracts IDs and routes", async () => {
@@ -195,10 +175,6 @@ describe("Cockpit API Integration Tests", () => {
     });
   });
 
-  // ==========================================================================
-  // System API Tests
-  // ==========================================================================
-
   describe("System API", () => {
     describe("healthCheck", () => {
       it("GET /api/system/healthcheck - makes request to health endpoint", async () => {
@@ -223,10 +199,6 @@ describe("Cockpit API Integration Tests", () => {
       });
     });
   });
-
-  // ==========================================================================
-  // Content API Tests
-  // ==========================================================================
 
   describe("Content API", () => {
     describe("getContentItems", () => {
@@ -273,10 +245,6 @@ describe("Cockpit API Integration Tests", () => {
       });
     });
   });
-
-  // ==========================================================================
-  // Pages API Tests
-  // ==========================================================================
 
   describe("Pages API", () => {
     describe("pages", () => {
@@ -494,10 +462,6 @@ describe("Cockpit API Integration Tests", () => {
     });
   });
 
-  // ==========================================================================
-  // Menus API Tests
-  // ==========================================================================
-
   describe("Menus API", () => {
     describe("pagesMenus", () => {
       it("GET /api/pages/menus - fetches all menus", async () => {
@@ -583,10 +547,6 @@ describe("Cockpit API Integration Tests", () => {
       });
     });
   });
-
-  // ==========================================================================
-  // Assets API Tests
-  // ==========================================================================
 
   describe("Assets API", () => {
     describe("assetById", () => {
@@ -705,10 +665,6 @@ describe("Cockpit API Integration Tests", () => {
     });
   });
 
-  // ==========================================================================
-  // Search API Tests (Detektivo addon - may not be available)
-  // ==========================================================================
-
   describe("Search API (Detektivo)", () => {
     describe("search", () => {
       it("GET /api/detektivo/search/{index} - handles search request", async () => {
@@ -737,10 +693,6 @@ describe("Cockpit API Integration Tests", () => {
       });
     });
   });
-
-  // ==========================================================================
-  // Localization API Tests (Lokalize addon - may not be available)
-  // ==========================================================================
 
   describe("Localization API (Lokalize)", () => {
     describe("localize", () => {
@@ -790,10 +742,6 @@ describe("Cockpit API Integration Tests", () => {
       });
     });
   });
-
-  // ==========================================================================
-  // Lightweight Fetch Client Tests
-  // ==========================================================================
 
   describe("Lightweight Fetch Client", () => {
     let fetchClient: FetchClient;
@@ -895,10 +843,6 @@ describe("Cockpit API Integration Tests", () => {
       });
     });
   });
-
-  // ==========================================================================
-  // Multi-Tenant Tests (only run if COCKPIT_TEST_TENANT is set)
-  // ==========================================================================
 
   describe("Multi-Tenant API", () => {
     let tenantClient: CockpitAPIClient;

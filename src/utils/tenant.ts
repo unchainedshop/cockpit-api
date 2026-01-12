@@ -4,10 +4,6 @@
 
 import type { CockpitAPIOptions } from "../core/config.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 /**
  * Options for URL-based tenant resolution
  */
@@ -69,10 +65,6 @@ export const resolveApiKey = (
     .toUpperCase();
   return process.env[secretName];
 };
-
-// ============================================================================
-// Tenant Resolution from URL/Subdomain
-// ============================================================================
 
 /**
  * Resolve tenant ID from a subdomain

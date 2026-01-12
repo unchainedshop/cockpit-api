@@ -5,10 +5,6 @@
 import type { MethodContext } from "./content.ts";
 import type { CockpitAsset } from "./assets.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface MenuQueryOptions {
   inactive?: boolean;
   locale?: string;
@@ -41,10 +37,6 @@ export interface CockpitMenu {
   color?: string;
   links: CockpitMenuLink[];
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 export interface MenuMethods {
   pagesMenus<T = CockpitMenu>(

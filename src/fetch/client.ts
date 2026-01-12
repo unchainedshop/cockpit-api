@@ -13,10 +13,6 @@ import { createLocaleNormalizer } from "../core/locale.ts";
 import type { CockpitPage } from "../methods/pages.ts";
 import type { CockpitContentItem } from "../methods/content.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 /**
  * Request cache mode for fetch requests
  */
@@ -95,10 +91,6 @@ export interface FetchClient {
     params?: Record<string, string | number | boolean | undefined>,
   ): Promise<T>;
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 /**
  * Build the API base URL for the given endpoint and tenant

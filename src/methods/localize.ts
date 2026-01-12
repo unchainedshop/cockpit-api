@@ -5,18 +5,10 @@
 import type { MethodContext } from "./content.ts";
 import { requireParam } from "../core/validation.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface LocalizeOptions {
   locale?: string;
   nested?: boolean;
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 export interface LocalizeMethods {
   localize<T = unknown>(

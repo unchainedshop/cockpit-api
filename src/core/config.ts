@@ -4,10 +4,6 @@
 
 import { resolveApiKey } from "../utils/tenant.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface CockpitAPIOptions {
   /** Cockpit CMS endpoint URL (falls back to COCKPIT_GRAPHQL_ENDPOINT env var) */
   endpoint?: string;
