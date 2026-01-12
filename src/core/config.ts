@@ -16,9 +16,8 @@ export interface CockpitAPIOptions {
   /**
    * Default language that maps to Cockpit's "default" locale.
    * When a request uses this language, it will be sent as "default" to Cockpit.
-   * @default "de"
    */
-  defaultLanguage?: string;
+  defaultLanguage?: string | null;
   /** Cache configuration */
   cache?: {
     /** Max entries (falls back to COCKPIT_CACHE_MAX env var, default: 100) */
@@ -40,7 +39,7 @@ export interface CockpitConfig {
   readonly tenant?: string;
   readonly apiKey?: string;
   readonly useAdminAccess: boolean;
-  readonly defaultLanguage: string;
+  readonly defaultLanguage: string | null;
   readonly cachePrefix: string;
 }
 
@@ -76,7 +75,7 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
   const config: CockpitConfig = Object.freeze({
     endpoint,
     useAdminAccess: options.useAdminAccess ?? false,
-    defaultLanguage: options.defaultLanguage ?? "de",
+    defaultLanguage: options.defaultLanguage ?? null,
     cachePrefix: `${endpointStr}:${options.tenant ?? "default"}:`,
     ...(options.tenant !== undefined && { tenant: options.tenant }),
     ...(apiKey !== undefined && { apiKey }),

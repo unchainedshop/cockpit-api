@@ -163,11 +163,11 @@ describe("createConfig", () => {
       assert.strictEqual(config.useAdminAccess, true);
     });
 
-    it("defaultLanguage defaults to de", () => {
+    it("defaultLanguage defaults to null", () => {
       const config = createConfig({
         endpoint: "https://example.com/api",
       });
-      assert.strictEqual(config.defaultLanguage, "de");
+      assert.strictEqual(config.defaultLanguage, null);
     });
 
     it("sets defaultLanguage when provided", () => {
