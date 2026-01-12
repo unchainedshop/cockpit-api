@@ -60,6 +60,8 @@ export type {
   CockpitContentItem,
   CockpitNewsItem,
   CockpitTreeNode,
+  CockpitListResponse,
+  CockpitListMeta,
 } from "./methods/content.ts";
 
 export { ImageSizeMode, MimeType } from "./methods/assets.ts";

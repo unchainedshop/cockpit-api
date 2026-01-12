@@ -176,6 +176,44 @@ describe("pages", () => {
     const [url] = mockFetch.mock.calls[0].arguments;
     assert.ok(url.includes("locale=default"));
   });
+
+  it("normalizes array response to { data } format", async () => {
+    mockFetch = mock.fn(async () => createMockResponse({ body: [{ _id: '1' }, { _id: '2' }] }));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
+    const result = await client.pages();
+
+    assert.ok(result !== null);
+    assert.ok('data' in result);
+    assert.ok(Array.isArray(result.data));
+    assert.strictEqual(result.data.length, 2);
+  });
+
+  it("returns wrapped response as-is when API returns { data, meta }", async () => {
+    mockFetch = mock.fn(async () => createMockResponse({
+      body: { data: [{ _id: '1' }], meta: { total: 5 } }
+    }));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
+    const result = await client.pages({ skip: 0 });
+
+    assert.ok(result !== null);
+    assert.ok('data' in result);
+    assert.ok('meta' in result);
+    assert.strictEqual(result.meta?.total, 5);
+  });
+
+  it("returns null for 404 response", async () => {
+    mockFetch = mock.fn(async () => createMockResponse({ status: 404, ok: false }));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
+    const result = await client.pages();
+
+    assert.strictEqual(result, null);
+  });
 });
 
 describe("pageById", () => {
@@ -241,6 +279,44 @@ describe("getContentItems", () => {
     const [url] = mockFetch.mock.calls[0].arguments;
     assert.ok(url.includes("limit=10"));
     assert.ok(url.includes("skip=5"));
+  });
+
+  it("normalizes array response to { data } format", async () => {
+    mockFetch = mock.fn(async () => createMockResponse({ body: [{ id: 1 }, { id: 2 }] }));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
+    const result = await client.getContentItems("news");
+
+    assert.ok(result !== null);
+    assert.ok('data' in result);
+    assert.ok(Array.isArray(result.data));
+    assert.strictEqual(result.data.length, 2);
+  });
+
+  it("returns wrapped response as-is when API returns { data, meta }", async () => {
+    mockFetch = mock.fn(async () => createMockResponse({
+      body: { data: [{ id: 1 }], meta: { total: 10 } }
+    }));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
+    const result = await client.getContentItems("news", { skip: 0 });
+
+    assert.ok(result !== null);
+    assert.ok('data' in result);
+    assert.ok('meta' in result);
+    assert.strictEqual(result.meta?.total, 10);
+  });
+
+  it("returns null for 404 response", async () => {
+    mockFetch = mock.fn(async () => createMockResponse({ status: 404, ok: false }));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
+    const result = await client.getContentItems("nonexistent");
+
+    assert.strictEqual(result, null);
   });
 });
 

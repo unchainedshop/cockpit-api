@@ -2,7 +2,11 @@
  * Pages API methods
  */
 
-import type { MethodContext, ContentListQueryOptions } from "./content.ts";
+import type {
+  MethodContext,
+  ContentListQueryOptions,
+  CockpitListResponse,
+} from "./content.ts";
 import type { CockpitAsset } from "./assets.ts";
 import { requireParam } from "../core/validation.ts";
 
@@ -52,9 +56,21 @@ export interface CockpitPage extends CockpitPageMeta {
 }
 
 export interface PagesMethods {
+  /**
+   * Get pages list.
+   *
+   * @returns Always returns `CockpitListResponse<T>` with data and optional meta.
+   * Returns `null` if pages cannot be fetched.
+   *
+   * @example
+   * const response = await cockpit.pages({ limit: 10, skip: 0 });
+   * // response: { data: CockpitPage[], meta?: { total: number } } | null
+   * const pages = response?.data || [];
+   * const total = response?.meta?.total;
+   */
   pages<T = CockpitPage>(
     options?: ContentListQueryOptions,
-  ): Promise<T[] | null>;
+  ): Promise<CockpitListResponse<T> | null>;
   pageById<T = CockpitPage>(
     id: string,
     options?: PageByIdOptions,
@@ -69,7 +85,7 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
   return {
     async pages<T = CockpitPage>(
       options: ContentListQueryOptions = {},
-    ): Promise<T[] | null> {
+    ): Promise<CockpitListResponse<T> | null> {
       const {
         locale = "default",
         limit,
@@ -83,7 +99,16 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
         locale,
         queryParams: { ...queryParams, limit, skip, sort, filter, fields },
       });
-      return ctx.http.fetch<T[]>(url);
+      const result = await ctx.http.fetch<T[] | CockpitListResponse<T>>(url);
+
+      // Normalize response to always return { data, meta? }
+      if (result === null) {
+        return null;
+      }
+      if (Array.isArray(result)) {
+        return { data: result };
+      }
+      return result;
     },
 
     async pageById<T = CockpitPage>(

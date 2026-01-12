@@ -37,9 +37,15 @@ export interface ContentListQueryOptions extends ListQueryOptions {
   queryParams?: Record<string, unknown>;
 }
 
-export interface TreeQueryOptions extends ListQueryOptions {
+export interface TreeQueryOptions {
   parent?: string;
+  filter?: Record<string, unknown>;
+  fields?: Record<string, 0 | 1>;
+  populate?: number;
+  locale?: string;
   queryParams?: Record<string, unknown>;
+  /** Override the client-level useAdminAccess setting for this request */
+  useAdminAccess?: boolean;
 }
 
 export interface AggregateQueryOptions {
@@ -74,14 +80,42 @@ export interface CockpitTreeNode<T = CockpitContentItem> {
   data?: T;
 }
 
+/**
+ * Metadata returned with paginated content responses
+ */
+export interface CockpitListMeta {
+  total?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Wrapper response format returned by Cockpit when using pagination (skip parameter)
+ */
+export interface CockpitListResponse<T> {
+  data: T[];
+  meta?: CockpitListMeta;
+}
+
 export interface ContentMethods {
   getContentItem<T = unknown>(
     options: ContentItemQueryOptions,
   ): Promise<T | null>;
+  /**
+   * Get multiple content items from a collection.
+   *
+   * @returns Always returns `CockpitListResponse<T>` with data and optional meta.
+   * Returns `null` if collection doesn't exist.
+   *
+   * @example
+   * const response = await cockpit.getContentItems('posts', { limit: 10 });
+   * // response: { data: Post[], meta?: { total: number } } | null
+   * const items = response?.data || [];
+   * const total = response?.meta?.total;
+   */
   getContentItems<T = CockpitContentItem>(
     model: string,
     options?: ContentListQueryOptions,
-  ): Promise<T[] | null>;
+  ): Promise<CockpitListResponse<T> | null>;
   getContentTree<T = CockpitContentItem>(
     model: string,
     options?: TreeQueryOptions,
@@ -129,7 +163,7 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
     async getContentItems<T = CockpitContentItem>(
       model: string,
       options: ContentListQueryOptions = {},
-    ): Promise<T[] | null> {
+    ): Promise<CockpitListResponse<T> | null> {
       requireParam(model, "a model");
       validatePathSegment(model, "model");
       const {
@@ -155,7 +189,19 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
           populate,
         },
       });
-      return ctx.http.fetch<T[]>(url, buildFetchOptions(useAdminAccess));
+      const result = await ctx.http.fetch<T[] | CockpitListResponse<T>>(
+        url,
+        buildFetchOptions(useAdminAccess),
+      );
+
+      // Normalize response to always return { data, meta? }
+      if (result === null) {
+        return null;
+      }
+      if (Array.isArray(result)) {
+        return { data: result };
+      }
+      return result;
     },
 
     async getContentTree<T = CockpitContentItem>(

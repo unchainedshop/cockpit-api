@@ -101,6 +101,10 @@ src/
 **Content:**
 - `getContentItem<T>({ model, id?, locale?, queryParams?, useAdminAccess? })`
 - `getContentItems<T>(model, { limit?, skip?, sort?, filter?, fields?, populate?, locale?, useAdminAccess? })`
+  - **Always returns `CockpitListResponse<T> | null`** with consistent format:
+    - `{ data: T[], meta?: { total: number } }`
+  - Access items: `response?.data || []`
+  - Access total: `response?.meta?.total`
 - `getContentTree<T>(model, { parent?, filter?, fields?, populate?, locale?, useAdminAccess? })`
 - `getAggregateModel<T>({ model, pipeline, locale? })`
 - `postContentItem<T>(model, item)`
@@ -108,6 +112,10 @@ src/
 
 **Pages:**
 - `pages<T>({ limit?, skip?, sort?, filter?, fields?, locale? })`
+  - **Always returns `CockpitListResponse<T> | null`** with consistent format:
+    - `{ data: T[], meta?: { total: number } }`
+  - Access pages: `response?.data || []`
+  - Access total: `response?.meta?.total`
 - `pageById<T>({ page, id, locale?, populate? })`
 - `pageByRoute<T>(route, { locale?, populate? })`
 
@@ -145,9 +153,9 @@ const cockpit = createFetchClient({
 
 // Available methods:
 cockpit.pageByRoute<T>(route, { locale?, populate? })
-cockpit.pages<T>({ locale?, ... })
+cockpit.pages<T>({ locale?, ... })  // Returns CockpitListResponse<T> | null
 cockpit.pageById<T>(page, id, { locale?, populate? })
-cockpit.getContentItems<T>(model, { locale?, limit?, ... })
+cockpit.getContentItems<T>(model, { locale?, limit?, ... })  // Returns CockpitListResponse<T> | null
 cockpit.getContentItem<T>(model, id?, { locale?, ... })
 cockpit.fetchRaw<T>(path, params)  // For custom paths
 ```
@@ -177,7 +185,7 @@ const gatewaySchema = stitchSchemas({
 **Main Package:**
 ```typescript
 // Client
-CockpitAPIClient, CockpitAPIOptions, CacheManager, CacheOptions
+CockpitAPIClient, CockpitAPIOptions, CacheManager, CacheOptions, AsyncCacheStore
 
 // Query Options
 ListQueryOptions, ContentItemQueryOptions, ContentListQueryOptions,
@@ -191,6 +199,7 @@ CockpitPageType, CockpitLayoutBlock, CockpitMenu, CockpitMenuUrl,
 CockpitMenuLink, CockpitRoute, CockpitRoutesResponse,
 CockpitSitemapEntry, CockpitSettings, CockpitPreviewConfig,
 CockpitContentItem, CockpitNewsItem, CockpitTreeNode,
+CockpitListResponse, CockpitListMeta,  // NEW: for paginated content responses
 CockpitSearchResult, CockpitSearchHit, CockpitHealthCheck
 
 // Enums
@@ -420,3 +429,144 @@ try {
 - **Environment Variables**: `COCKPIT_CACHE_MAX` and `COCKPIT_CACHE_TTL` are only used when no custom cache store is provided. They are ignored when using a custom store.
 
 - **No-Op Cache**: When `cache: false`, all cache operations become no-ops but still return Promises for API consistency.
+
+## v3.0.0 (Breaking Changes)
+
+### 1. Consistent List Response Format
+
+All list methods now return a consistent response format regardless of parameters:
+
+**Changed Methods:**
+- `getContentItems<T>()` - Now always returns `CockpitListResponse<T> | null`
+- `pages<T>()` - Now always returns `CockpitListResponse<T> | null`
+- Fetch client methods (`pages()`, `getContentItems()`) - Now always return `CockpitListResponse<T> | null`
+
+**Response Format:**
+```typescript
+interface CockpitListResponse<T> {
+  data: T[];
+  meta?: CockpitListMeta;  // Present when using pagination (skip parameter)
+}
+
+interface CockpitListMeta {
+  total?: number;
+  [key: string]: unknown;
+}
+```
+
+**Before (v2.x)**:
+```typescript
+// Without skip - returns array directly
+const items = await cockpit.getContentItems('posts', { limit: 10 });
+// items: Post[] | null
+
+// With skip - returns wrapped response
+const response = await cockpit.getContentItems('posts', { limit: 10, skip: 0 });
+// response: { data: Post[], meta: { total: number } } | Post[] | null
+
+// Required normalization
+const normalizedItems = Array.isArray(response) ? response : response?.data || [];
+const total = !Array.isArray(response) && response?.meta?.total;
+```
+
+**After (v3.0.0)**:
+```typescript
+// Always returns consistent format
+const response = await cockpit.getContentItems('posts', { limit: 10 });
+// response: { data: Post[], meta?: { total: number } } | null
+
+// No normalization needed
+const items = response?.data || [];
+const total = response?.meta?.total;
+
+// Same applies to pages()
+const pageResponse = await cockpit.pages({ limit: 10, skip: 0 });
+const pages = pageResponse?.data || [];
+const total = pageResponse?.meta?.total;
+```
+
+### Migration Guide: v2.x → v3.0.0
+
+#### 1. Update getContentItems() Calls
+
+```typescript
+// Before (v2.x)
+const items = await cockpit.getContentItems('posts', { limit: 10 });
+// items could be Post[] or null
+
+// After (v3.0.0)
+const response = await cockpit.getContentItems('posts', { limit: 10 });
+const items = response?.data || [];
+```
+
+#### 2. Update pages() Calls
+
+```typescript
+// Before (v2.x)
+const pages = await cockpit.pages({ limit: 10 });
+// pages could be Page[] or null
+
+// After (v3.0.0)
+const response = await cockpit.pages({ limit: 10 });
+const pages = response?.data || [];
+```
+
+#### 3. Update Fetch Client Calls
+
+The lightweight fetch client has the same changes:
+
+```typescript
+// Before (v2.x)
+const pages = await fetchClient.pages();
+// pages: Page[] | null
+
+// After (v3.0.0)
+const response = await fetchClient.pages();
+const pages = response?.data || [];
+```
+
+#### 4. Accessing Metadata
+
+Metadata (like `total`) is now consistently available via the `meta` property:
+
+```typescript
+// v3.0.0 - Always consistent
+const response = await cockpit.getContentItems('posts', { limit: 10, skip: 0 });
+if (response?.meta?.total) {
+  console.log(`Total items: ${response.meta.total}`);
+}
+```
+
+### Benefits
+
+1. **Predictable API**: No need to check if response is an array or object
+2. **Type Safety**: Single return type makes TypeScript usage cleaner
+3. **Easier Testing**: Tests can always expect the same shape
+4. **Better DX**: No manual normalization required
+
+### 2. TreeQueryOptions Type Correction
+
+`TreeQueryOptions` no longer extends `ListQueryOptions`, removing the incorrect `limit` and `skip` parameters.
+
+**Reason:** Tree endpoints work with hierarchical data structures where `limit`/`skip` don't make semantic sense. Trees are controlled by:
+- `parent` - Filter to a specific subtree
+- `populate` - Control depth of tree traversal
+- `filter` - Filter nodes based on criteria
+- `fields` - Select specific fields to return
+
+**Impact:** If you were passing `limit` or `skip` to `getContentTree()`, TypeScript will now correctly flag this as an error. These parameters were always ignored by the implementation.
+
+```typescript
+// Before (v2.x) - TypeScript allowed but parameters were ignored
+await cockpit.getContentTree('categories', {
+  limit: 10,  // ❌ Was silently ignored
+  skip: 5     // ❌ Was silently ignored
+});
+
+// After (v3.0.0) - TypeScript correctly prevents invalid parameters
+await cockpit.getContentTree('categories', {
+  parent: 'root-id',  // ✅ Correct - filter to subtree
+  populate: 2,        // ✅ Correct - control depth
+  filter: { active: true }  // ✅ Correct - filter nodes
+});
+```

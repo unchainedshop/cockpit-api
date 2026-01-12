@@ -23,6 +23,7 @@ import {
   type AggregateQueryOptions,
   type CockpitContentItem,
   type CockpitTreeNode,
+  type CockpitListResponse,
 } from "./methods/content.ts";
 import {
   createPagesMethods,
@@ -74,7 +75,7 @@ export interface CockpitAPIClient {
   getContentItems<T = CockpitContentItem>(
     model: string,
     options?: ContentListQueryOptions,
-  ): Promise<T[] | null>;
+  ): Promise<CockpitListResponse<T> | null>;
   getContentTree<T = CockpitContentItem>(
     model: string,
     options?: TreeQueryOptions,
@@ -91,7 +92,7 @@ export interface CockpitAPIClient {
   // Pages API
   pages<T = CockpitPage>(
     options?: ContentListQueryOptions,
-  ): Promise<T[] | null>;
+  ): Promise<CockpitListResponse<T> | null>;
   pageById<T = CockpitPage>(
     id: string,
     options?: PageByIdOptions,

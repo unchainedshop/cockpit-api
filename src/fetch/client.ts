@@ -11,7 +11,10 @@
 
 import { createLocaleNormalizer } from "../core/locale.ts";
 import type { CockpitPage } from "../methods/pages.ts";
-import type { CockpitContentItem } from "../methods/content.ts";
+import type {
+  CockpitContentItem,
+  CockpitListResponse,
+} from "../methods/content.ts";
 
 /**
  * Request cache mode for fetch requests
@@ -67,18 +70,20 @@ export interface FetchClient {
     route: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
-  /** Fetch pages list */
-  pages<T = CockpitPage>(params?: PageFetchParams): Promise<T[] | null>;
+  /** Fetch pages list. Always returns { data, meta? } or null. */
+  pages<T = CockpitPage>(
+    params?: PageFetchParams,
+  ): Promise<CockpitListResponse<T> | null>;
   /** Fetch a page by ID */
   pageById<T = CockpitPage>(
     id: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
-  /** Fetch content items */
+  /** Fetch content items. Always returns { data, meta? } or null. */
   getContentItems<T = CockpitContentItem>(
     model: string,
     params?: PageFetchParams,
-  ): Promise<T[] | null>;
+  ): Promise<CockpitListResponse<T> | null>;
   /** Fetch a single content item */
   getContentItem<T = unknown>(
     model: string,
@@ -212,12 +217,24 @@ export function createFetchClient(
      */
     async pages<T = CockpitPage>(
       params: PageFetchParams = {},
-    ): Promise<T[] | null> {
+    ): Promise<CockpitListResponse<T> | null> {
       const { locale, ...rest } = params;
-      return fetchRaw<T[]>("/pages/pages", {
-        locale: normalizeLocale(locale),
-        ...rest,
-      });
+      const result = await fetchRaw<T[] | CockpitListResponse<T> | null>(
+        "/pages/pages",
+        {
+          locale: normalizeLocale(locale),
+          ...rest,
+        },
+      );
+
+      // Normalize response to always return { data, meta? }
+      if (result === null) {
+        return null;
+      }
+      if (Array.isArray(result)) {
+        return { data: result };
+      }
+      return result;
     },
 
     /**
@@ -241,12 +258,24 @@ export function createFetchClient(
     async getContentItems<T = CockpitContentItem>(
       model: string,
       params: PageFetchParams = {},
-    ): Promise<T[] | null> {
+    ): Promise<CockpitListResponse<T> | null> {
       const { locale, ...rest } = params;
-      return fetchRaw<T[]>(`/content/items/${model}`, {
-        locale: normalizeLocale(locale),
-        ...rest,
-      });
+      const result = await fetchRaw<T[] | CockpitListResponse<T> | null>(
+        `/content/items/${model}`,
+        {
+          locale: normalizeLocale(locale),
+          ...rest,
+        },
+      );
+
+      // Normalize response to always return { data, meta? }
+      if (result === null) {
+        return null;
+      }
+      if (Array.isArray(result)) {
+        return { data: result };
+      }
+      return result;
     },
 
     /**

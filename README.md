@@ -103,13 +103,17 @@ const localizedPost = await cockpit.getContentItem({
   queryParams: { fields: { title: 1, content: 1 } }
 });
 
-// Get multiple content items with pagination
-const posts = await cockpit.getContentItems('posts', {
+// Get multiple content items - always returns { data, meta? }
+const response = await cockpit.getContentItems('posts', {
   limit: 10,
-  skip: 0,
   sort: { _created: -1 },
   filter: { published: true }
 });
+// response: { data: Post[], meta?: { total: number } } | null
+
+// Access items and metadata
+const items = response?.data || [];
+const total = response?.meta?.total;
 
 // Get tree structure
 const tree = await cockpit.getContentTree('categories', {
@@ -133,8 +137,10 @@ await cockpit.deleteContentItem('posts', '123');
 ### Pages
 
 ```typescript
-// List pages
-const allPages = await cockpit.pages({ locale: 'en', limit: 50 });
+// List pages - always returns { data, meta? }
+const response = await cockpit.pages({ locale: 'en', limit: 50 });
+const allPages = response?.data || [];
+const total = response?.meta?.total;
 
 // Get page by ID
 const page = await cockpit.pageById({ page: 'blog', id: '123', locale: 'en' });
@@ -228,9 +234,16 @@ const cockpit = createFetchClient({
 
 // Available methods
 const page = await cockpit.pageByRoute('/about', { locale: 'en' });
-const pages = await cockpit.pages({ locale: 'en' });
+
+// List methods return { data, meta? }
+const pagesResponse = await cockpit.pages({ locale: 'en' });
+const pages = pagesResponse?.data || [];
+
 const pageById = await cockpit.pageById('blog', '123', { locale: 'en' });
-const items = await cockpit.getContentItems('news', { locale: 'en', limit: 10 });
+
+const itemsResponse = await cockpit.getContentItems('news', { locale: 'en', limit: 10 });
+const items = itemsResponse?.data || [];
+
 const item = await cockpit.getContentItem('news', '123', { locale: 'en' });
 const custom = await cockpit.fetchRaw('/custom/endpoint', { param: 'value' });
 ```
@@ -344,6 +357,43 @@ const cockpit = await CockpitAPI({
 });
 ```
 
+## Response Format (v3.0.0+)
+
+All list methods return a **consistent response format** regardless of parameters:
+
+```typescript
+interface CockpitListResponse<T> {
+  data: T[];
+  meta?: CockpitListMeta;  // Present when using pagination (skip parameter)
+}
+```
+
+### Methods with Consistent Response Format
+
+- `getContentItems()` - Always returns `CockpitListResponse<T> | null`
+- `pages()` - Always returns `CockpitListResponse<T> | null`
+- Fetch client methods - Always return `CockpitListResponse<T> | null`
+
+### Usage Example
+
+```typescript
+import type { CockpitListResponse } from '@unchainedshop/cockpit-api';
+
+// Always get { data, meta? } format
+const response = await cockpit.getContentItems('posts', { limit: 10, skip: 0 });
+
+// Access items
+const items = response?.data || [];
+
+// Access metadata (available when using skip parameter)
+const total = response?.meta?.total;
+```
+
+**Benefits:**
+- No need to check if response is array or object
+- Predictable type signatures
+- Easier to work with pagination
+
 ## TypeScript Support
 
 ```typescript
@@ -370,6 +420,8 @@ import type {
   CockpitRoute,
   CockpitSearchResult,
   CockpitContentItem,
+  CockpitListResponse,   // New: for paginated content responses
+  CockpitListMeta,       // New: metadata in paginated responses
 
   // Schema Types
   MakeCockpitSchemaOptions,
@@ -417,6 +469,58 @@ cockpit.clearCache('ROUTE');
 // After (v2.2.0)
 await cockpit.clearCache();
 await cockpit.clearCache('ROUTE');
+```
+
+### v3.0.0 (Breaking Changes)
+
+**Consistent List Response Format:**
+
+All list methods now return `CockpitListResponse<T> | null` instead of varying between arrays and wrapped responses:
+
+**Changed Methods:**
+- `getContentItems()` - Now always returns `{ data: T[], meta?: {...} } | null`
+- `pages()` - Now always returns `{ data: T[], meta?: {...} } | null`
+- Fetch client `getContentItems()` and `pages()` - Now always return `{ data: T[], meta?: {...} } | null`
+
+**Migration:**
+```typescript
+// Before (v2.x)
+const items = await cockpit.getContentItems('posts', { limit: 10 });
+// items could be Post[] or null
+
+const pages = await cockpit.pages({ limit: 10 });
+// pages could be Page[] or null
+
+// After (v3.0.0)
+const itemsResponse = await cockpit.getContentItems('posts', { limit: 10 });
+const items = itemsResponse?.data || [];
+const total = itemsResponse?.meta?.total;
+
+const pagesResponse = await cockpit.pages({ limit: 10 });
+const pages = pagesResponse?.data || [];
+const total = pagesResponse?.meta?.total;
+```
+
+**Benefits:**
+- Single, predictable return type for all list methods
+- No need to check `Array.isArray()` or normalize responses
+- Cleaner TypeScript types
+- Metadata always accessible via `.meta` property
+
+**TreeQueryOptions Type Correction:**
+
+`TreeQueryOptions` no longer incorrectly includes `limit` and `skip` parameters (which were always ignored). Tree structures use `parent`, `populate`, `filter`, and `fields` instead.
+
+```typescript
+// Before (v2.x) - allowed but ignored
+await cockpit.getContentTree('categories', { limit: 10 });  // ❌ TypeScript allowed this
+
+// After (v3.0.0) - TypeScript prevents invalid usage
+await cockpit.getContentTree('categories', {
+  parent: 'root-id',  // ✅ Correct
+  populate: 2,        // ✅ Correct
+  filter: { active: true }  // ✅ Correct
+});
 ```
 
 ## Peer Dependencies

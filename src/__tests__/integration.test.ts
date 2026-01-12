@@ -97,13 +97,14 @@ describe("Cockpit API Integration Tests", () => {
 
   describe("Discovery Phase", () => {
     it("discovers pages and extracts IDs and routes", async () => {
-      const pages = await client.pages<{
+      const response = await client.pages<{
         _id: string;
         _r?: string;
         route?: string;
       }>();
 
-      if (pages && pages.length > 0) {
+      const pages = response?.data || [];
+      if (pages.length > 0) {
         discovered.pageIds = pages.map((p) => p._id).filter(Boolean);
         discovered.pageRoutes = pages
           .map((p) => p._r ?? p.route)
@@ -249,40 +250,43 @@ describe("Cockpit API Integration Tests", () => {
   describe("Pages API", () => {
     describe("pages", () => {
       it("GET /api/pages/pages - fetches pages list", async () => {
-        const result = await client.pages();
+        const response = await client.pages();
 
         assert.ok(
-          result === null || Array.isArray(result),
-          "Should return null or array",
+          response === null || (response.data && Array.isArray(response.data)),
+          "Should return null or { data: array }",
         );
 
-        if (result && result.length > 0) {
-          const page = result[0] as Record<string, unknown>;
+        if (response?.data && response.data.length > 0) {
+          const page = response.data[0] as Record<string, unknown>;
           assert.ok("_id" in page, "Page should have _id");
         }
       });
 
       it("GET /api/pages/pages - respects limit parameter", async () => {
-        const result = await client.pages({ limit: 2 });
+        const response = await client.pages({ limit: 2 });
 
-        if (result) {
-          assert.ok(result.length <= 2, "Should respect limit parameter");
+        if (response?.data) {
+          assert.ok(response.data.length <= 2, "Should respect limit parameter");
         }
       });
 
       it("GET /api/pages/pages - respects skip parameter", async () => {
         // Fetch with explicit sort to ensure deterministic order
-        const allPages = await client.pages({
+        const allResponse = await client.pages({
           limit: 10,
           sort: { _created: -1 },
         });
-        const skippedPages = await client.pages({
+        const skippedResponse = await client.pages({
           limit: 5,
           skip: 2,
           sort: { _created: -1 },
         });
 
-        if (allPages && skippedPages && allPages.length > 2) {
+        const allPages = allResponse?.data || [];
+        const skippedPages = skippedResponse?.data || [];
+
+        if (allPages.length > 2 && skippedPages.length > 0) {
           // First item of skipped should match third item of all
           const allIds = allPages.map(
             (p) => (p as Record<string, unknown>)["_id"],
@@ -299,13 +303,21 @@ describe("Cockpit API Integration Tests", () => {
             );
           }
         }
+
+        // Verify that skip parameter returns meta with total
+        if (skippedResponse?.meta) {
+          assert.ok(
+            typeof skippedResponse.meta.total === "number",
+            "Should return meta.total when using skip",
+          );
+        }
       });
 
       it("GET /api/pages/pages - passes locale parameter", async () => {
         // Just verify it doesn't error with locale
-        const result = await client.pages({ locale: "en" });
+        const response = await client.pages({ locale: "en" });
         assert.ok(
-          result === null || Array.isArray(result),
+          response === null || (response.data && Array.isArray(response.data)),
           "Should handle locale parameter",
         );
       });
@@ -755,19 +767,19 @@ describe("Cockpit API Integration Tests", () => {
 
     describe("pages", () => {
       it("fetches pages list", async () => {
-        const result = await fetchClient.pages();
+        const response = await fetchClient.pages();
 
         assert.ok(
-          result === null || Array.isArray(result),
-          "Should return null or array",
+          response === null || (response.data && Array.isArray(response.data)),
+          "Should return null or { data: array }",
         );
       });
 
       it("passes parameters correctly", async () => {
-        const result = await fetchClient.pages({ locale: "de", limit: 2 });
+        const response = await fetchClient.pages({ locale: "de", limit: 2 });
 
-        if (result) {
-          assert.ok(result.length <= 2, "Should respect limit");
+        if (response?.data) {
+          assert.ok(response.data.length <= 2, "Should respect limit");
         }
       });
     });
@@ -814,10 +826,10 @@ describe("Cockpit API Integration Tests", () => {
 
     describe("getContentItems", () => {
       it("returns null for non-existent model", async () => {
-        const result = await fetchClient.getContentItems(
+        const response = await fetchClient.getContentItems(
           "nonexistent_model_xyz_12345",
         );
-        assert.strictEqual(result, null, "Should return null for 404");
+        assert.strictEqual(response, null, "Should return null for 404");
       });
     });
 
@@ -890,13 +902,14 @@ describe("Cockpit API Integration Tests", () => {
           return;
         }
 
-        const pages = await tenantClient.pages<{
+        const response = await tenantClient.pages<{
           _id: string;
           _r?: string;
           route?: string;
         }>();
 
-        if (pages && pages.length > 0) {
+        const pages = response?.data || [];
+        if (pages.length > 0) {
           tenantDiscovered.pageIds = pages.map((p) => p._id).filter(Boolean);
           tenantDiscovered.pageRoutes = pages
             .map((p) => p._r ?? p.route)
@@ -940,11 +953,11 @@ describe("Cockpit API Integration Tests", () => {
           return;
         }
 
-        const result = await tenantClient.pages();
+        const response = await tenantClient.pages();
 
         assert.ok(
-          result === null || Array.isArray(result),
-          "Should return null or array",
+          response === null || (response.data && Array.isArray(response.data)),
+          "Should return null or { data: array }",
         );
       });
 
@@ -1049,11 +1062,11 @@ describe("Cockpit API Integration Tests", () => {
           return;
         }
 
-        const result = await tenantFetchClient.pages();
+        const response = await tenantFetchClient.pages();
 
         assert.ok(
-          result === null || Array.isArray(result),
-          "Should return null or array",
+          response === null || (response.data && Array.isArray(response.data)),
+          "Should return null or { data: array }",
         );
       });
 
@@ -1093,26 +1106,26 @@ describe("Cockpit API Integration Tests", () => {
         }
 
         // Fetch pages from both clients
-        const noTenantPages = await client.pages<{ _id: string }>();
-        const tenantPages = await tenantClient.pages<{ _id: string }>();
+        const noTenantResponse = await client.pages<{ _id: string }>();
+        const tenantResponse = await tenantClient.pages<{ _id: string }>();
 
-        // Both should return data
+        // Both should return data in new format
         assert.ok(
-          noTenantPages === null || Array.isArray(noTenantPages),
-          "No-tenant should return null or array",
+          noTenantResponse === null ||
+            (noTenantResponse.data && Array.isArray(noTenantResponse.data)),
+          "No-tenant should return null or { data: array }",
         );
         assert.ok(
-          tenantPages === null || Array.isArray(tenantPages),
-          "Tenant should return null or array",
+          tenantResponse === null ||
+            (tenantResponse.data && Array.isArray(tenantResponse.data)),
+          "Tenant should return null or { data: array }",
         );
+
+        const noTenantPages = noTenantResponse?.data || [];
+        const tenantPages = tenantResponse?.data || [];
 
         // If both have data, the IDs should be different (different content spaces)
-        if (
-          noTenantPages &&
-          noTenantPages.length > 0 &&
-          tenantPages &&
-          tenantPages.length > 0
-        ) {
+        if (noTenantPages.length > 0 && tenantPages.length > 0) {
           const noTenantIds = new Set(noTenantPages.map((p) => p._id));
           const tenantIds = new Set(tenantPages.map((p) => p._id));
 

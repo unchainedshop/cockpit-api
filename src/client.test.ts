@@ -214,6 +214,47 @@ describe('CockpitAPI', () => {
       const [url] = mockFetch.mock.calls[0].arguments;
       assert.ok(url.toString().includes('/content/items/posts'));
     });
+
+    it('normalizes array response to { data } format', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [{ id: 1 }, { id: 2 }] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.getContentItems('posts');
+
+      assert.ok(result !== null);
+      assert.ok('data' in result);
+      assert.ok(Array.isArray(result.data));
+      assert.strictEqual(result.data.length, 2);
+    });
+
+    it('returns wrapped response as-is when API returns { data, meta }', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({
+        body: { data: [{ id: 1 }], meta: { total: 10 } }
+      }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.getContentItems('posts', { skip: 0 });
+
+      assert.ok(result !== null);
+      assert.ok('data' in result);
+      assert.ok('meta' in result);
+      assert.strictEqual(result.meta?.total, 10);
+    });
+
+    it('returns null for 404 response', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ status: 404 }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.getContentItems('nonexistent');
+
+      assert.strictEqual(result, null);
+    });
   });
 
   describe('postContentItem', () => {
@@ -296,6 +337,47 @@ describe('CockpitAPI', () => {
 
       const [url] = mockFetch.mock.calls[0].arguments;
       assert.ok(url.toString().includes('/pages/pages'));
+    });
+
+    it('normalizes array response to { data } format', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [{ _id: '1' }, { _id: '2' }] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pages();
+
+      assert.ok(result !== null);
+      assert.ok('data' in result);
+      assert.ok(Array.isArray(result.data));
+      assert.strictEqual(result.data.length, 2);
+    });
+
+    it('returns wrapped response as-is when API returns { data, meta }', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({
+        body: { data: [{ _id: '1' }], meta: { total: 5 } }
+      }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pages({ skip: 0 });
+
+      assert.ok(result !== null);
+      assert.ok('data' in result);
+      assert.ok('meta' in result);
+      assert.strictEqual(result.meta?.total, 5);
+    });
+
+    it('returns null for 404 response', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ status: 404 }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pages();
+
+      assert.strictEqual(result, null);
     });
   });
 
