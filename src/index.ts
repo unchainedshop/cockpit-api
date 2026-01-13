@@ -95,3 +95,15 @@ export type {
 } from "./methods/search.ts";
 
 export type { CockpitHealthCheck } from "./methods/system.ts";
+
+export {
+  parseCockpitUrl,
+  isCockpitPageUrl,
+  isCockpitAssetUrl,
+  extractPageId,
+  extractAssetId,
+} from "./utils/url-protocols.ts";
+export type {
+  CockpitProtocol,
+  ParsedCockpitUrl,
+} from "./utils/url-protocols.ts";

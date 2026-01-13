@@ -18,6 +18,7 @@ export interface PageByIdOptions {
 export interface PageByRouteOptions {
   locale?: string;
   populate?: number;
+  fallbackToDefault?: boolean;
 }
 
 export type CockpitPageType = "layout" | "collection" | "singleton" | "link";
@@ -132,12 +133,42 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
       options: PageByRouteOptions | string = "default",
     ): Promise<T | null> {
       const opts = typeof options === "string" ? { locale: options } : options;
-      const { locale = "default", populate } = opts;
+      const { locale = "default", populate, fallbackToDefault = false } = opts;
+
+      // Force populate: 0 to prevent route string issues
+      const queryOptions = { populate: populate ?? 0 };
+
       const url = ctx.url.build("/pages/page", {
         locale,
-        queryParams: { route, populate },
+        queryParams: { route, ...queryOptions },
       });
-      return ctx.http.fetch<T>(url);
+
+      const result = await ctx.http.fetch<T>(url);
+
+      // If found, return it
+      if (result) return result;
+
+      // If not found and fallback enabled and not in default locale
+      if (fallbackToDefault && locale !== "default") {
+        // Try to find in default locale
+        const defaultUrl = ctx.url.build("/pages/page", {
+          locale: "default",
+          queryParams: { route, ...queryOptions },
+        });
+        const defaultResult = await ctx.http.fetch<T & { _id?: string }>(
+          defaultUrl,
+        );
+
+        // If found in default, get by ID in target locale
+        if (defaultResult?._id != null && defaultResult._id !== "") {
+          return this.pageById<T>(defaultResult._id, {
+            locale,
+            populate: queryOptions.populate,
+          });
+        }
+      }
+
+      return null;
     },
   };
 }
