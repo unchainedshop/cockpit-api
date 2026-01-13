@@ -94,7 +94,7 @@ describe("createCacheManager", () => {
 
   it("clears all entries using default LRU store clear method", async () => {
     // This test specifically ensures the LRU cache.clear() call is executed
-    const cache = createCacheManager("test:lru:");
+    const cache = createCacheManager("test:lru:", { max: 10, ttl: 60000 });
     await cache.set("a", 1);
     await cache.set("b", 2);
     await cache.set("c", 3);
@@ -114,6 +114,18 @@ describe("createCacheManager", () => {
     assert.strictEqual(await cache.get("c"), undefined);
     assert.strictEqual(await cache.get("d"), undefined);
     assert.strictEqual(await cache.get("e"), undefined);
+  });
+
+  it("clears default LRU cache by explicitly calling with no args", async () => {
+    const cache = createCacheManager("test:explicit:");
+    await cache.set("x", "value-x");
+    await cache.set("y", "value-y");
+
+    // Explicitly call with no arguments to ensure branch coverage
+    await cache.clear();
+
+    assert.strictEqual(await cache.get("x"), undefined);
+    assert.strictEqual(await cache.get("y"), undefined);
   });
 
   it("works with custom async store", async () => {

@@ -316,4 +316,108 @@ describe("createHttpClient", () => {
       assert.strictEqual(headers["api-Key"], "secret-key");
     });
   });
+
+  describe("header normalization edge cases", () => {
+    it("handles array headers", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ body: {} })),
+      );
+
+      const client = createHttpClient(createTestConfig(), identityTransformer);
+      await client.fetch("https://test.example.com/api/test", {
+        headers: ["header1", "header2"] as unknown as Record<string, string>,
+      });
+
+      // Should not throw and should ignore invalid headers
+      assert.strictEqual(mockFetch.mock.callCount(), 1);
+    });
+
+    it("handles null headers", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ body: {} })),
+      );
+
+      const client = createHttpClient(createTestConfig(), identityTransformer);
+      await client.fetch("https://test.example.com/api/test", {
+        headers: null as unknown as Record<string, string>,
+      });
+
+      // Should not throw
+      assert.strictEqual(mockFetch.mock.callCount(), 1);
+    });
+
+    it("handles undefined headers", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ body: {} })),
+      );
+
+      const client = createHttpClient(createTestConfig(), identityTransformer);
+      await client.fetch("https://test.example.com/api/test", {
+        headers: undefined,
+      });
+
+      // Should not throw
+      assert.strictEqual(mockFetch.mock.callCount(), 1);
+    });
+  });
+
+  describe("fetchText method", () => {
+    it("returns text response", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ textBody: "https://example.com/image.jpg" })),
+      );
+
+      const client = createHttpClient(createTestConfig(), identityTransformer);
+      const result = await client.fetchText("https://test.example.com/api/asset");
+
+      assert.strictEqual(result, "https://example.com/image.jpg");
+    });
+
+    it("returns null for 404 response", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ ok: false, status: 404 })),
+      );
+
+      const client = createHttpClient(createTestConfig(), identityTransformer);
+      const result = await client.fetchText("https://test.example.com/api/notfound");
+
+      assert.strictEqual(result, null);
+    });
+
+    it("throws for non-OK non-404 responses", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(
+          createMockResponse({
+            ok: false,
+            status: 500,
+            url: "https://test.example.com/api/error",
+            textBody: "Server error",
+          }),
+        ),
+      );
+
+      const client = createHttpClient(createTestConfig(), identityTransformer);
+
+      await assert.rejects(
+        () => client.fetchText("https://test.example.com/api/error"),
+        /Cockpit: Error accessing.*500.*Server error/,
+      );
+    });
+  });
+
+  describe("post with undefined body", () => {
+    it("handles undefined body correctly", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ body: { success: true } })),
+      );
+
+      const client = createHttpClient(createTestConfig(), identityTransformer);
+      await client.post("https://test.example.com/api/test", undefined);
+
+      const call = mockFetch.mock.calls[0];
+      const options = call.arguments[1];
+      // When body is undefined, it should not be set in options
+      assert.strictEqual(options?.body, undefined);
+    });
+  });
 });

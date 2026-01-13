@@ -978,6 +978,134 @@ describe('Extended API methods', () => {
       const [url] = mockFetch.mock.calls[0].arguments;
       assert.ok(url.toString().includes('populate=3'));
     });
+
+    it('returns page when found without fallback', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      const mockPage = { _id: '123', title: 'Test Page', type: 'layout' };
+      mockFetch = mock.fn(async () => createMockResponse({ body: mockPage }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pageByRoute('/test', { locale: 'en', fallbackToDefault: true });
+
+      assert.deepStrictEqual(result, mockPage);
+      assert.strictEqual(mockFetch.mock.callCount(), 1);
+    });
+
+    it('returns null when not found and fallbackToDefault is false', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ ok: false, status: 404 }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pageByRoute('/test', { locale: 'en', fallbackToDefault: false });
+
+      assert.strictEqual(result, null);
+      assert.strictEqual(mockFetch.mock.callCount(), 1);
+    });
+
+    it('falls back to default locale when not found and fallbackToDefault is true', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      const mockPage = { _id: '456', title: 'Default Page', type: 'layout' };
+
+      // First call returns null (page not found in 'en' locale)
+      // Second call returns page from default locale
+      // Third call returns page by ID in 'en' locale
+      let callCount = 0;
+      mockFetch = mock.fn(async (url: string) => {
+        callCount++;
+        const urlStr = url.toString();
+
+        if (callCount === 1) {
+          // First request to /pages/page with locale=en - not found
+          assert.ok(urlStr.includes('locale=en'));
+          return createMockResponse({ ok: false, status: 404 });
+        } else if (callCount === 2) {
+          // Second request to /pages/page with locale=default - found
+          assert.ok(urlStr.includes('locale=default'));
+          return createMockResponse({ body: mockPage });
+        } else {
+          // Third request to /pages/page/{id} with locale=en
+          assert.ok(urlStr.includes('/pages/page/456'));
+          assert.ok(urlStr.includes('locale=en'));
+          return createMockResponse({ body: { ...mockPage, title: 'Page in EN' } });
+        }
+      });
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pageByRoute('/test', { locale: 'en', fallbackToDefault: true });
+
+      assert.deepStrictEqual(result, { ...mockPage, title: 'Page in EN' });
+      assert.strictEqual(mockFetch.mock.callCount(), 3);
+    });
+
+    it('returns null when fallback finds nothing', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      // Both requests return 404
+      mockFetch = mock.fn(async () => createMockResponse({ ok: false, status: 404 }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pageByRoute('/nonexistent', { locale: 'en', fallbackToDefault: true });
+
+      assert.strictEqual(result, null);
+      assert.strictEqual(mockFetch.mock.callCount(), 2); // Initial + fallback
+    });
+
+    it('returns null when fallback finds page without _id', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      let callCount = 0;
+      mockFetch = mock.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          // Not found in requested locale
+          return createMockResponse({ ok: false, status: 404 });
+        } else {
+          // Found in default but without _id
+          return createMockResponse({ body: { title: 'Page without ID', type: 'layout' } });
+        }
+      });
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pageByRoute('/test', { locale: 'en', fallbackToDefault: true });
+
+      assert.strictEqual(result, null);
+      assert.strictEqual(mockFetch.mock.callCount(), 2);
+    });
+
+    it('returns null when fallback finds page with empty _id', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      let callCount = 0;
+      mockFetch = mock.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return createMockResponse({ ok: false, status: 404 });
+        } else {
+          return createMockResponse({ body: { _id: '', title: 'Page with empty ID', type: 'layout' } });
+        }
+      });
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pageByRoute('/test', { locale: 'en', fallbackToDefault: true });
+
+      assert.strictEqual(result, null);
+      assert.strictEqual(mockFetch.mock.callCount(), 2);
+    });
+
+    it('does not fallback when locale is already default', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
+
+      mockFetch = mock.fn(async () => createMockResponse({ ok: false, status: 404 }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.pageByRoute('/test', { locale: 'default', fallbackToDefault: true });
+
+      assert.strictEqual(result, null);
+      assert.strictEqual(mockFetch.mock.callCount(), 1); // No fallback attempt
+    });
   });
 
   describe('pages with extended options', () => {

@@ -55,7 +55,7 @@
   },
   "types": "dist/index.d.ts",
   "peerDependencies": {
-    "@graphql-tools/wrap": "11.1.4",
+    "@graphql-tools/wrap": "^10.0.0 || ^11.0.0",
     "graphql": "^15.0.0 || ^16.0.0"
   },
   "peerDependenciesMeta": {
