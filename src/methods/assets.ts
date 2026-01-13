@@ -44,24 +44,28 @@ export enum MimeType {
   BMP = "bmp",
 }
 
-export interface ImageAssetQueryParams {
+/**
+ * Image transformation parameters for imageAssetById.
+ *
+ * At least one of `w` (width) or `h` (height) must be provided.
+ * The Cockpit CMS API requires this and returns a 400 error without it.
+ */
+export type ImageAssetQueryParams = {
   m?: ImageSizeMode;
-  w?: number;
-  h?: number;
   q?: number;
   mime?: MimeType;
   re?: number;
   t?: string;
   o?: number;
-}
+} & ({ w: number; h?: number } | { w?: number; h: number });
 
 export interface AssetMethods {
   assetById<T = CockpitAsset>(assetId: string): Promise<T | null>;
   /**
    * Get a transformed image asset URL.
    *
-   * **Important:** The `w` (width) or `h` (height) parameter is required by the API.
-   * Without it, the API returns a 400 error.
+   * **Important:** At least one of `w` (width) or `h` (height) must be provided.
+   * The Cockpit CMS API requires this and returns a 400 error without it.
    *
    * @param assetId - The asset ID
    * @param queryParams - Image transformation parameters (w or h required)
@@ -69,7 +73,7 @@ export interface AssetMethods {
    */
   imageAssetById(
     assetId: string,
-    queryParams?: ImageAssetQueryParams,
+    queryParams: ImageAssetQueryParams,
   ): Promise<string | null>;
 }
 

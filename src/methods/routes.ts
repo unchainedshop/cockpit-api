@@ -35,7 +35,7 @@ export interface CockpitSettings {
     logo?: CockpitAsset | null;
     small?: CockpitAsset | null;
     favicon?: CockpitAsset | null;
-    [key: string]: CockpitAsset | null | undefined;
+    [key: string]: CockpitAsset | null;
   };
   scripts?: {
     header?: string | null;

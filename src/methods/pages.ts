@@ -102,6 +102,9 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
       const result = await ctx.http.fetch<T[] | CockpitListResponse<T>>(url);
 
       // Normalize response to always return { data, meta? }
+      // Note: The Cockpit /api/pages/pages endpoint returns a raw array even when skip
+      // is provided, unlike /api/content/items/{model} which returns { data, meta }.
+      // This means meta.total will not be available for pages() method.
       if (result === null) {
         return null;
       }

@@ -114,8 +114,9 @@ src/
 - `pages<T>({ limit?, skip?, sort?, filter?, fields?, locale? })`
   - **Always returns `CockpitListResponse<T> | null`** with consistent format:
     - `{ data: T[], meta?: { total: number } }`
+  - **Note:** The Cockpit CMS `/api/pages/pages` endpoint returns a raw array and does not include `meta.total` even when using pagination (unlike `/api/content/items/{model}`). The library normalizes this to `{ data: [...] }` but `meta` will not be present.
   - Access pages: `response?.data || []`
-  - Access total: `response?.meta?.total`
+  - Access total: `response?.meta?.total` (will be undefined for pages())
 - `pageById<T>({ page, id, locale?, populate? })`
 - `pageByRoute<T>(route, { locale?, populate? })`
 

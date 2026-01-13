@@ -457,7 +457,7 @@ describe('CockpitAPI', () => {
       const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });
 
       await assertThrows(
-        () => client.imageAssetById(''),
+        () => client.imageAssetById('', { w: 100 }),
         'Please provide assetId'
       );
     });
