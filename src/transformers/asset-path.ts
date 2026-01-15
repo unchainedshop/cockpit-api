@@ -21,7 +21,7 @@ export function transformAssetPaths(
   config: AssetPathConfig,
 ): string {
   const { baseUrl, tenant } = config;
-  const tenantUrl = `${baseUrl}${tenant !== undefined ? `/:${tenant}` : ""}`;
+  const tenantUrl = `${baseUrl}${tenant ? `/:${tenant}` : ""}`;
 
   return (
     jsonString

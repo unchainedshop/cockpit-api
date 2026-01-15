@@ -132,7 +132,7 @@ export function createRemoteExecutor(
       preloadRoutes: true,
       ...cockpitOptions,
     };
-    if (tenant !== undefined) clientOpts.tenant = tenant;
+    if (tenant) clientOpts.tenant = tenant;
     const clientPromise = CockpitAPI(clientOpts);
 
     pendingClients.set(key, clientPromise);

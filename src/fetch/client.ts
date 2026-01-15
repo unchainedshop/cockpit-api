@@ -102,8 +102,7 @@ export interface FetchClient {
  */
 function buildApiBaseUrl(endpoint: string, tenant?: string | null): string {
   const url = new URL(endpoint);
-  const basePath =
-    tenant !== undefined && tenant !== null ? `/:${tenant}/api` : "/api";
+  const basePath = tenant ? `/:${tenant}/api` : "/api";
   return `${url.origin}${basePath}`;
 }
 

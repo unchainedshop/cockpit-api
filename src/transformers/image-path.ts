@@ -36,7 +36,7 @@ export function createImagePathTransformer(
 
   // Build asset config, only including tenant if defined
   const assetConfig: AssetPathConfig = { baseUrl };
-  if (tenant !== undefined) assetConfig.tenant = tenant;
+  if (tenant) assetConfig.tenant = tenant;
 
   return {
     transform<T>(originalResponse: T): T {
@@ -56,29 +56,5 @@ export function createImagePathTransformer(
         return originalResponse;
       }
     },
-  };
-}
-
-/**
- * Legacy export for backwards compatibility
- * @deprecated Use createImagePathTransformer instead
- */
-export function FixImagePaths(
-  endpoint: string,
-  replacements: Record<string, string>,
-  tenant?: string,
-): { transformResult<T>(originalResponse: T): T } {
-  const baseUrl = new URL(endpoint).origin;
-
-  const config: ImagePathTransformerConfig = {
-    baseUrl,
-    replacements,
-  };
-  if (tenant !== undefined) config.tenant = tenant;
-
-  const transformer = createImagePathTransformer(config);
-
-  return {
-    transformResult: transformer.transform.bind(transformer),
   };
 }

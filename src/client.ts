@@ -252,7 +252,7 @@ export async function CockpitAPI(
     baseUrl: config.endpoint.origin,
     replacements: routeReplacements,
   };
-  if (options.tenant !== undefined) transformerConfig.tenant = options.tenant;
+  if (options.tenant) transformerConfig.tenant = options.tenant;
   const transformer = createImagePathTransformer(transformerConfig);
 
   // Create URL builder
@@ -267,7 +267,7 @@ export async function CockpitAPI(
     url: urlBuilder,
     cache,
     endpoint: endpointString,
-    ...(options.tenant !== undefined && { tenant: options.tenant }),
+    ...(options.tenant && { tenant: options.tenant }),
   };
 
   // Create method groups

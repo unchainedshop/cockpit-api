@@ -43,7 +43,7 @@ export async function generateCmsRouteReplacements(
 
   try {
     const origin = new URL(endpoint).origin;
-    const apiPath = tenant !== undefined ? `/:${tenant}/api` : "/api";
+    const apiPath = tenant ? `/:${tenant}/api` : "/api";
     const response = await fetch(
       `${origin}${apiPath}/pages/pages?${new URLSearchParams(filterParams).toString()}`,
     );
@@ -108,7 +108,7 @@ export async function generateCollectionAndSingletonSlugRouteMap(
 
   try {
     const origin = new URL(endpoint).origin;
-    const apiPath = tenant !== undefined ? `/:${tenant}/api` : "/api";
+    const apiPath = tenant ? `/:${tenant}/api` : "/api";
     const response = await fetch(
       `${origin}${apiPath}/pages/pages?locale=default&${new URLSearchParams(filterParams).toString()}`,
     );

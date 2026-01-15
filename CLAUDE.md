@@ -209,7 +209,7 @@ ImageSizeMode, MimeType
 // Utilities
 getTenantIds, resolveTenantFromUrl, resolveTenantFromSubdomain,
 generateCmsRouteReplacements, generateCollectionAndSingletonSlugRouteMap,
-FixImagePaths, createImagePathTransformer, composeTransformers,
+createImagePathTransformer, composeTransformers,
 identityTransformer, ResponseTransformer, MethodContext,
 TenantUrlResult, ResolveTenantFromUrlOptions, ResolveTenantFromSubdomainOptions
 ```

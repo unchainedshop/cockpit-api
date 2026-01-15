@@ -34,8 +34,6 @@ export type { ResponseTransformer } from "./transformers/image-path.ts";
 export {
   createImagePathTransformer,
   identityTransformer,
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  FixImagePaths,
 } from "./transformers/image-path.ts";
 export {
   createAssetPathTransformer,

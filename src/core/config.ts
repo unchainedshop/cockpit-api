@@ -114,7 +114,7 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
       : options.tenant;
 
   // Validate tenant format to prevent path traversal
-  if (tenant !== undefined && !VALID_TENANT_PATTERN.test(tenant)) {
+  if (tenant && !VALID_TENANT_PATTERN.test(tenant)) {
     throw new Error(
       "Cockpit: Invalid tenant format (only alphanumeric, hyphens, and underscores allowed)",
     );
@@ -129,7 +129,7 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
     useAdminAccess: options.useAdminAccess ?? false,
     defaultLanguage: options.defaultLanguage ?? null,
     cachePrefix: `${endpointStr}:${tenant ?? "default"}:`,
-    ...(tenant !== undefined && { tenant }),
+    ...(tenant && { tenant }),
     ...(apiKey !== undefined && { apiKey }),
   });
 

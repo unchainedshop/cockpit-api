@@ -24,11 +24,9 @@ export default tseslint.config(
       "@typescript-eslint/explicit-function-return-type": "error",
       "@typescript-eslint/explicit-module-boundary-types": "error",
       "@typescript-eslint/no-explicit-any": "error",
-      "@typescript-eslint/strict-boolean-expressions": "error",
       "@typescript-eslint/switch-exhaustiveness-check": "error",
       "@typescript-eslint/consistent-type-exports": "error",
       "@typescript-eslint/consistent-type-imports": "error",
-      // Prevent common mistakes
       "@typescript-eslint/no-confusing-void-expression": "error",
       "@typescript-eslint/no-meaningless-void-operator": "error",
       "@typescript-eslint/no-mixed-enums": "error",

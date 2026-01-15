@@ -27,8 +27,7 @@ export interface UrlBuilder {
  * Creates a URL builder for the given configuration
  */
 export function createUrlBuilder(config: CockpitConfig): UrlBuilder {
-  const apiBasePath =
-    config.tenant !== undefined ? `/:${config.tenant}/api` : "/api";
+  const apiBasePath = config.tenant ? `/:${config.tenant}/api` : "/api";
   const normalizeLocale = createLocaleNormalizer(config.defaultLanguage);
 
   return {
@@ -53,7 +52,7 @@ export function createUrlBuilder(config: CockpitConfig): UrlBuilder {
 
     graphqlEndpoint(): URL {
       const url = new URL(config.endpoint);
-      if (config.tenant !== undefined) {
+      if (config.tenant) {
         url.pathname = `/:${config.tenant}${url.pathname}`;
       }
       return url;
