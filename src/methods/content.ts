@@ -37,6 +37,17 @@ export interface ContentListQueryOptions extends ListQueryOptions {
   queryParams?: Record<string, unknown>;
 }
 
+/**
+ * Query options for Unchained content endpoint (supports unpublished items)
+ */
+export interface UnchainedContentListQueryOptions extends ContentListQueryOptions {
+  /**
+   * Include unpublished items in results.
+   * Requires admin access with content/{model}/read permission.
+   */
+  includeUnpublished?: boolean;
+}
+
 export interface TreeQueryOptions {
   parent?: string;
   filter?: Record<string, unknown>;
@@ -116,6 +127,27 @@ export interface ContentMethods {
     model: string,
     options?: ContentListQueryOptions,
   ): Promise<CockpitListResponse<T> | null>;
+  /**
+   * Get content items including unpublished via Unchained module.
+   *
+   * Requires admin access with content/{model}/read permission.
+   *
+   * @returns Always returns `CockpitListResponse<T>` with data array.
+   * Returns `null` if model doesn't exist.
+   *
+   * @example
+   * ```typescript
+   * const response = await cockpit.getUnchainedContentItems('posts', {
+   *   limit: 10,
+   *   includeUnpublished: true,
+   * });
+   * const items = response?.data || [];
+   * ```
+   */
+  getUnchainedContentItems<T = CockpitContentItem>(
+    model: string,
+    options?: UnchainedContentListQueryOptions,
+  ): Promise<CockpitListResponse<T> | null>;
   getContentTree<T = CockpitContentItem>(
     model: string,
     options?: TreeQueryOptions,
@@ -193,6 +225,50 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
         url,
         buildFetchOptions(useAdminAccess),
       );
+
+      // Normalize response to always return { data, meta? }
+      if (result === null) {
+        return null;
+      }
+      if (Array.isArray(result)) {
+        return { data: result };
+      }
+      return result;
+    },
+
+    async getUnchainedContentItems<T = CockpitContentItem>(
+      model: string,
+      options: UnchainedContentListQueryOptions = {},
+    ): Promise<CockpitListResponse<T> | null> {
+      requireParam(model, "a model");
+      validatePathSegment(model, "model");
+      const {
+        locale = "default",
+        limit,
+        skip,
+        sort,
+        filter,
+        fields,
+        populate,
+        includeUnpublished,
+        queryParams = {},
+      } = options;
+      const url = ctx.url.build(`/unchained/content/items/${model}`, {
+        locale,
+        queryParams: {
+          ...queryParams,
+          limit,
+          skip,
+          sort,
+          filter,
+          fields,
+          populate,
+          ...(includeUnpublished && { includeUnpublished: 1 }),
+        },
+      });
+      const result = await ctx.http.fetch<T[] | CockpitListResponse<T>>(url, {
+        useAdminAccess: true,
+      });
 
       // Normalize response to always return { data, meta? }
       if (result === null) {

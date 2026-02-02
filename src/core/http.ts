@@ -38,6 +38,15 @@ export interface HttpClient {
   ): Promise<T | null>;
 
   /**
+   * Make a POST request with FormData body (multipart/form-data)
+   */
+  postFormData<T>(
+    url: URL | string,
+    formData: FormData,
+    options?: HttpFetchOptions,
+  ): Promise<T | null>;
+
+  /**
    * Make a DELETE request
    */
   delete<T>(url: URL | string, options?: HttpFetchOptions): Promise<T | null>;
@@ -177,6 +186,23 @@ export function createHttpClient(
         url,
         prepareJsonRequestOptions(options, "POST", body),
       );
+    },
+
+    async postFormData<T>(
+      url: URL | string,
+      formData: FormData,
+      options: HttpFetchOptions = {},
+    ): Promise<T | null> {
+      const { useAdminAccess, headers, ...restOptions } = options;
+      const customHeaders = normalizeHeaders(headers);
+      // Do NOT set Content-Type - let browser set it with correct boundary
+      return fetchData<T>(url, {
+        ...restOptions,
+        method: "POST",
+        body: formData,
+        headers: customHeaders,
+        ...(useAdminAccess !== undefined && { useAdminAccess }),
+      });
     },
 
     async delete<T>(

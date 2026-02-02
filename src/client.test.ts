@@ -552,6 +552,156 @@ describe('CockpitAPI', () => {
     });
   });
 
+  describe('uploadAssets', () => {
+    it('throws when files not provided', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      await assertThrows(
+        () => client.uploadAssets(null as unknown as File[]),
+        'Please provide files'
+      );
+    });
+
+    it('returns empty assets array for empty files array', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      const result = await client.uploadAssets([]);
+
+      assert.deepStrictEqual(result, { assets: [] });
+    });
+
+    it('sends POST request with FormData', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key', useAdminAccess: true });
+
+      const mockAsset = { _id: 'asset123', path: '/uploads/test.txt' };
+      mockFetch = mock.fn(async () => createMockResponse({ body: { assets: [mockAsset] } }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const file = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const result = await client.uploadAssets([file]);
+
+      assert.strictEqual(mockFetch.mock.calls.length, 1);
+      const [url, options] = mockFetch.mock.calls[0].arguments;
+      assert.ok(url.toString().includes('/unchained/assets/upload'));
+      assert.strictEqual(options.method, 'POST');
+      assert.ok(options.body instanceof FormData);
+      // Response goes through image path transformer
+      assert.ok(result?.assets?.[0]?._id === 'asset123');
+      assert.ok(result?.assets?.[0]?.path?.includes('/uploads/test.txt'));
+    });
+
+    it('includes folder in query params when provided', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key', useAdminAccess: true });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: { assets: [] } }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const file = new File(['test'], 'test.txt', { type: 'text/plain' });
+      await client.uploadAssets([file], { folder: 'documents' });
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      assert.ok(url.toString().includes('folder=documents'));
+    });
+
+    it('always uses admin access', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'secret-key' });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: { assets: [] } }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const file = new File(['test'], 'test.txt', { type: 'text/plain' });
+      await client.uploadAssets([file]);
+
+      const [, options] = mockFetch.mock.calls[0].arguments;
+      assert.strictEqual(options.headers['api-Key'], 'secret-key');
+    });
+  });
+
+  describe('getUnchainedContentItems', () => {
+    it('throws when model not provided', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      await assertThrows(
+        () => client.getUnchainedContentItems(''),
+        'Please provide a model'
+      );
+    });
+
+    it('constructs correct URL with unchained path', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.getUnchainedContentItems('posts');
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      assert.ok(url.toString().includes('/unchained/content/items/posts'));
+    });
+
+    it('includes includeUnpublished=1 when set to true', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.getUnchainedContentItems('posts', { includeUnpublished: true });
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      assert.ok(url.toString().includes('includeUnpublished=1'));
+    });
+
+    it('does not include includeUnpublished when false', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.getUnchainedContentItems('posts', { includeUnpublished: false });
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      assert.ok(!url.toString().includes('includeUnpublished'));
+    });
+
+    it('normalizes array response to { data } format', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      const items = [{ _id: '1', title: 'Test' }];
+      mockFetch = mock.fn(async () => createMockResponse({ body: items }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const result = await client.getUnchainedContentItems('posts');
+
+      assert.deepStrictEqual(result, { data: items });
+    });
+
+    it('always uses admin access', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'secret-key' });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.getUnchainedContentItems('posts');
+
+      const [, options] = mockFetch.mock.calls[0].arguments;
+      assert.strictEqual(options.headers['api-Key'], 'secret-key');
+    });
+
+    it('supports pagination parameters', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, apiKey: 'test-key' });
+
+      mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      await client.getUnchainedContentItems('posts', { limit: 10, skip: 20 });
+
+      const [url] = mockFetch.mock.calls[0].arguments;
+      const urlStr = url.toString();
+      assert.ok(urlStr.includes('limit=10'));
+      assert.ok(urlStr.includes('skip=20'));
+    });
+  });
+
   describe('error handling', () => {
     it('returns null on 404 response', async () => {
       const client = await CockpitAPI({ endpoint: TEST_ENDPOINT });

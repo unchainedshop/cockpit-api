@@ -59,6 +59,21 @@ export type ImageAssetQueryParams = {
   o?: number;
 } & ({ w: number; h?: number } | { w?: number; h: number });
 
+/**
+ * Options for uploading assets
+ */
+export interface UploadAssetsOptions {
+  /** Target folder name for upload */
+  folder?: string;
+}
+
+/**
+ * Response from asset upload
+ */
+export interface UploadAssetsResponse {
+  assets: CockpitAsset[];
+}
+
 export interface AssetMethods {
   assetById<T = CockpitAsset>(assetId: string): Promise<T | null>;
   /**
@@ -75,6 +90,26 @@ export interface AssetMethods {
     assetId: string,
     queryParams: ImageAssetQueryParams,
   ): Promise<string | null>;
+  /**
+   * Upload assets to Cockpit CMS (Unchained module).
+   *
+   * Requires admin access (API key with assets/upload permission).
+   *
+   * @param files - Files to upload (File objects or Blob with name)
+   * @param options - Upload options (optional folder name)
+   * @returns Uploaded assets metadata
+   *
+   * @example
+   * ```typescript
+   * const file = new File(['content'], 'test.txt', { type: 'text/plain' });
+   * const result = await client.uploadAssets([file], { folder: 'documents' });
+   * console.log(result?.assets);
+   * ```
+   */
+  uploadAssets(
+    files: File[],
+    options?: UploadAssetsOptions,
+  ): Promise<UploadAssetsResponse | null>;
 }
 
 export function createAssetMethods(ctx: MethodContext): AssetMethods {
@@ -94,6 +129,31 @@ export function createAssetMethods(ctx: MethodContext): AssetMethods {
         queryParams: queryParams as Record<string, unknown>,
       });
       return ctx.http.fetchText(url);
+    },
+
+    async uploadAssets(
+      files: File[],
+      options: UploadAssetsOptions = {},
+    ): Promise<UploadAssetsResponse | null> {
+      requireParam(files, "files");
+      if (files.length === 0) {
+        return { assets: [] };
+      }
+
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append("files[]", file);
+      }
+
+      const url = ctx.url.build("/unchained/assets/upload", {
+        queryParams: {
+          ...(options.folder && { folder: options.folder }),
+        },
+      });
+
+      return ctx.http.postFormData<UploadAssetsResponse>(url, formData, {
+        useAdminAccess: true,
+      });
     },
   };
 }

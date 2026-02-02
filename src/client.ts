@@ -19,6 +19,7 @@ import {
   type MethodContext,
   type ContentItemQueryOptions,
   type ContentListQueryOptions,
+  type UnchainedContentListQueryOptions,
   type TreeQueryOptions,
   type AggregateQueryOptions,
   type CockpitContentItem,
@@ -45,6 +46,8 @@ import {
   createAssetMethods,
   type ImageAssetQueryParams,
   type CockpitAsset,
+  type UploadAssetsOptions,
+  type UploadAssetsResponse,
 } from "./methods/assets.ts";
 import { createGraphQLMethods } from "./methods/graphql.ts";
 import {
@@ -75,6 +78,15 @@ export interface CockpitAPIClient {
   getContentItems<T = CockpitContentItem>(
     model: string,
     options?: ContentListQueryOptions,
+  ): Promise<CockpitListResponse<T> | null>;
+  /**
+   * Get content items including unpublished via Unchained module.
+   *
+   * Requires admin access with content/{model}/read permission.
+   */
+  getUnchainedContentItems<T = CockpitContentItem>(
+    model: string,
+    options?: UnchainedContentListQueryOptions,
   ): Promise<CockpitListResponse<T> | null>;
   getContentTree<T = CockpitContentItem>(
     model: string,
@@ -146,6 +158,15 @@ export interface CockpitAPIClient {
     assetId: string,
     queryParams: ImageAssetQueryParams,
   ): Promise<string | null>;
+  /**
+   * Upload assets to Cockpit CMS (Unchained module).
+   *
+   * Requires admin access (API key with assets/upload permission).
+   */
+  uploadAssets(
+    files: File[],
+    options?: UploadAssetsOptions,
+  ): Promise<UploadAssetsResponse | null>;
 
   // Utility
   getFullRouteForSlug(slug: string): Promise<string | undefined>;

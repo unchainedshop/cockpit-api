@@ -105,6 +105,10 @@ src/
     - `{ data: T[], meta?: { total: number } }`
   - Access items: `response?.data || []`
   - Access total: `response?.meta?.total`
+- `getUnchainedContentItems<T>(model, { limit?, skip?, sort?, filter?, fields?, populate?, locale?, includeUnpublished? })` - Unchained module
+  - Same response format as `getContentItems`
+  - Always uses admin access (requires API key with `content/{model}/read` permission)
+  - Set `includeUnpublished: true` to include unpublished items
 - `getContentTree<T>(model, { parent?, filter?, fields?, populate?, locale?, useAdminAccess? })`
 - `getAggregateModel<T>({ model, pipeline, locale? })`
 - `postContentItem<T>(model, item)`
@@ -129,11 +133,17 @@ src/
 - `pagesSitemap<T>()`
 - `pagesSetting<T>(locale?)`
 
+**Assets:**
+- `assetById<T>(assetId)`
+- `imageAssetById<T>(assetId, { m?, w?, h?, q?, re?, t?, o?, mime? })`
+- `uploadAssets(files, { folder? })` - Unchained module
+  - Upload files to Cockpit CMS
+  - Always uses admin access (requires API key with `assets/upload` permission)
+  - Returns `{ assets: CockpitAsset[] }`
+
 **Other:**
 - `search<T>({ index, q?, limit?, offset? })` - Detektivo addon
 - `localize<T>(projectName, { locale?, nested? })` - Lokalize addon
-- `assetById<T>(assetId)`
-- `imageAssetById<T>(assetId, { m?, w?, h?, q?, re?, t?, o?, mime? })`
 - `graphQL<T>(document, variables?)`
 - `healthCheck<T>()`
 - `clearCache(pattern?)`
@@ -190,9 +200,9 @@ CockpitAPIClient, CockpitAPIOptions, CacheManager, CacheOptions, AsyncCacheStore
 
 // Query Options
 ListQueryOptions, ContentItemQueryOptions, ContentListQueryOptions,
-TreeQueryOptions, AggregateQueryOptions, PageQueryOptions,
-PageByRouteOptions, MenuQueryOptions, LocalizeOptions,
-SearchQueryOptions, ImageAssetQueryParams
+UnchainedContentListQueryOptions, TreeQueryOptions, AggregateQueryOptions,
+PageQueryOptions, PageByRouteOptions, MenuQueryOptions, LocalizeOptions,
+SearchQueryOptions, ImageAssetQueryParams, UploadAssetsOptions
 
 // Response Types
 CockpitAsset, CockpitPage, CockpitPageMeta, CockpitPageSeo,
@@ -200,7 +210,7 @@ CockpitPageType, CockpitLayoutBlock, CockpitMenu, CockpitMenuUrl,
 CockpitMenuLink, CockpitRoute, CockpitRoutesResponse,
 CockpitSitemapEntry, CockpitSettings, CockpitPreviewConfig,
 CockpitContentItem, CockpitNewsItem, CockpitTreeNode,
-CockpitListResponse, CockpitListMeta,  // NEW: for paginated content responses
+CockpitListResponse, CockpitListMeta, UploadAssetsResponse,
 CockpitSearchResult, CockpitSearchHit, CockpitHealthCheck
 
 // Enums

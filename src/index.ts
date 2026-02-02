@@ -46,6 +46,7 @@ export type {
   ListQueryOptions,
   ContentItemQueryOptions,
   ContentListQueryOptions,
+  UnchainedContentListQueryOptions,
   TreeQueryOptions,
   AggregateQueryOptions,
 } from "./methods/content.ts";
@@ -63,7 +64,12 @@ export type {
 } from "./methods/content.ts";
 
 export { ImageSizeMode, MimeType } from "./methods/assets.ts";
-export type { CockpitAsset, ImageAssetQueryParams } from "./methods/assets.ts";
+export type {
+  CockpitAsset,
+  ImageAssetQueryParams,
+  UploadAssetsOptions,
+  UploadAssetsResponse,
+} from "./methods/assets.ts";
 
 export type {
   CockpitPageType,
