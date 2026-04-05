@@ -1,15 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { TEST_ENDPOINT } from '../__tests__/test-helpers.ts';
 import { createImagePathTransformer, identityTransformer } from './image-path.ts';
 import { createAssetPathTransformer } from './asset-path.ts';
 import { createPageLinkTransformer } from './page-link.ts';
+
+const TEST_ORIGIN = 'https://test.cockpit.com';
 
 describe('createImagePathTransformer', () => {
   describe('transformResult', () => {
     it('fixes "path":"/ to include storage URL', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
       });
       // When JSON.stringify runs, "path":"/" becomes "path":"/" in the string
@@ -23,7 +24,7 @@ describe('createImagePathTransformer', () => {
 
     it('fixes src attribute paths in HTML content', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
       });
       const input = { html: '<img src="/storage/uploads/image.jpg" />' };
@@ -38,7 +39,7 @@ describe('createImagePathTransformer', () => {
         'pages://def456': '/contact',
       };
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements,
       });
       const input = { link: 'pages://abc123', other: 'pages://def456' };
@@ -49,7 +50,7 @@ describe('createImagePathTransformer', () => {
 
     it('handles empty replacements object gracefully', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
       });
       const input = { text: 'pages://unknown-id' };
@@ -60,7 +61,7 @@ describe('createImagePathTransformer', () => {
 
     it('fixes double storage/uploads paths', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
       });
       // The code has a regex that removes duplicate /storage/uploads/ sequences
@@ -74,7 +75,7 @@ describe('createImagePathTransformer', () => {
 
     it('returns original on JSON parse error', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
       });
       // Circular reference causes JSON.stringify to fail
@@ -87,7 +88,7 @@ describe('createImagePathTransformer', () => {
     it('works with deeply nested objects', () => {
       const replacements = { 'pages://id1': '/page1' };
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements,
       });
       const input = {
@@ -106,7 +107,7 @@ describe('createImagePathTransformer', () => {
     it('works with arrays of objects', () => {
       const replacements = { 'pages://id1': '/page1' };
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements,
       });
       const input = {
@@ -122,7 +123,7 @@ describe('createImagePathTransformer', () => {
 
     it('preserves non-matching content', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
       });
       const input = {
@@ -140,7 +141,7 @@ describe('createImagePathTransformer', () => {
 
     it('handles null and undefined values', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
       });
       const input = { a: null, b: undefined, c: 'text' };
@@ -156,7 +157,7 @@ describe('createImagePathTransformer', () => {
         'pages://id2': '/page2',
       };
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements,
       });
       const input = { text: 'Link to pages://id1 and pages://id2' };
@@ -170,7 +171,7 @@ describe('createImagePathTransformer', () => {
         'pages://id2': undefined as unknown as string,
       };
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements,
       });
       const input = { link1: 'pages://id1', link2: 'pages://id2' };
@@ -184,7 +185,7 @@ describe('createImagePathTransformer', () => {
   describe('with tenant', () => {
     it('includes tenant in URL when provided', () => {
       const transformer = createImagePathTransformer({
-        baseUrl: TEST_ENDPOINT,
+        baseUrl: TEST_ORIGIN,
         replacements: {},
         tenant: 'mytenant',
       });

@@ -69,6 +69,7 @@ export interface CockpitAPIClient {
   graphQL<T = unknown>(
     document: DocumentNode,
     variables?: Record<string, unknown>,
+    operationName?: string,
   ): Promise<T | null>;
 
   // Content API
@@ -270,7 +271,7 @@ export async function CockpitAPI(
     tenant?: string;
     replacements: Record<string, string>;
   } = {
-    baseUrl: config.endpoint.origin,
+    baseUrl: config.publicUrl ?? config.endpoint.origin,
     replacements: routeReplacements,
   };
   if (options.tenant) transformerConfig.tenant = options.tenant;

@@ -75,6 +75,23 @@ export interface CockpitAPIOptions {
    */
   cache?: false | CacheOptions;
   /**
+   * Public URL for asset path rewriting.
+   * When using an internal/Docker endpoint (e.g. http://cms:80/api/gql), asset paths
+   * would contain the internal hostname. Set this to the public-facing URL so that
+   * asset paths use the correct origin in responses.
+   *
+   * Falls back to COCKPIT_PUBLIC_URL env var. When omitted, uses endpoint.origin.
+   *
+   * @example
+   * ```typescript
+   * const client = await CockpitAPI({
+   *   endpoint: 'http://cms-internal:80/api/gql',  // internal
+   *   publicUrl: 'https://cms.example.com',         // public-facing
+   * });
+   * ```
+   */
+  publicUrl?: string;
+  /**
    * Preload route replacements during client initialization.
    * When true, fetches page routes to enable `pages://id` link resolution in responses.
    * When false (default), skips the network request for faster cold starts.
@@ -89,6 +106,7 @@ export interface CockpitConfig {
   readonly apiKey?: string;
   readonly useAdminAccess: boolean;
   readonly defaultLanguage: string | null;
+  readonly publicUrl?: string;
   readonly cachePrefix: string;
 }
 
@@ -122,6 +140,8 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
 
   const endpoint = new URL(endpointStr);
   const apiKey = resolveApiKey(tenant, options);
+  const publicUrl =
+    options.publicUrl ?? process.env["COCKPIT_PUBLIC_URL"] ?? undefined;
 
   // Build config object with all properties before freezing
   const config: CockpitConfig = Object.freeze({
@@ -131,6 +151,7 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
     cachePrefix: `${endpointStr}:${tenant ?? "default"}:`,
     ...(tenant && { tenant }),
     ...(apiKey !== undefined && { apiKey }),
+    ...(publicUrl !== undefined && { publicUrl }),
   });
 
   return config;

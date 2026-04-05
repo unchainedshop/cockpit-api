@@ -52,6 +52,7 @@ export interface MakeCockpitSchemaOptions {
 export interface ExecutorRequest {
   document: DocumentNode;
   variables?: Record<string, unknown>;
+  operationName?: string;
   context?: CockpitExecutorContext;
 }
 
@@ -146,7 +147,12 @@ export function createRemoteExecutor(
     }
   }
 
-  return async ({ document, variables, context }: ExecutorRequest) => {
+  return async ({
+    document,
+    variables,
+    operationName,
+    context,
+  }: ExecutorRequest) => {
     // Extract tenant from context
     const tenant = extractTenant
       ? extractTenant(context)
@@ -156,6 +162,6 @@ export function createRemoteExecutor(
     const cockpit = await getOrCreateClient(tenant);
 
     // Execute GraphQL query
-    return cockpit.graphQL(document, variables);
+    return cockpit.graphQL(document, variables, operationName);
   };
 }
