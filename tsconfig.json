@@ -24,10 +24,10 @@
     "moduleResolution": "NodeNext",
     "noImplicitReturns": true,
     "outDir": "dist",
+    "rootDir": "src",
     "skipLibCheck": true,
     "target": "ESNext",
-    "types": ["node"],
-    "baseUrl": "."
+    "types": ["node"]
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/__tests__"]

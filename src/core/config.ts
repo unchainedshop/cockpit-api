@@ -148,7 +148,7 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
     endpoint,
     useAdminAccess: options.useAdminAccess ?? false,
     defaultLanguage: options.defaultLanguage ?? null,
-    cachePrefix: `${endpointStr}:${tenant ?? "default"}:`,
+    cachePrefix: `cockpit-api:${endpointStr}:${tenant ?? "default"}:`,
     ...(tenant && { tenant }),
     ...(apiKey !== undefined && { apiKey }),
     ...(publicUrl !== undefined && { publicUrl }),

@@ -2,7 +2,7 @@
  * GraphQL schema builder for Cockpit CMS schema stitching
  */
 
-import type { GraphQLSchema } from "graphql";
+import { buildClientSchema, type GraphQLSchema } from "graphql";
 import {
   createRemoteExecutor,
   type MakeCockpitSchemaOptions,
@@ -65,9 +65,8 @@ export async function makeCockpitGraphQLSchema(
   // Dynamic import to handle optional peer dependency
   let wrapModule: GraphQLToolsWrapModule;
   try {
-    wrapModule = (await import(
-      "@graphql-tools/wrap" as string
-    )) as GraphQLToolsWrapModule;
+    wrapModule =
+      (await import("@graphql-tools/wrap")) as GraphQLToolsWrapModule;
   } catch {
     throw new Error(
       "Cockpit: @graphql-tools/wrap is required for schema stitching. " +
@@ -76,7 +75,7 @@ export async function makeCockpitGraphQLSchema(
   }
 
   const { schemaFromExecutor, wrapSchema, FilterRootFields } = wrapModule;
-  const { filterMutations = true, transforms = [] } = options;
+  const { filterMutations = true, transforms = [], introspection } = options;
 
   const executor = createRemoteExecutor(options);
 
@@ -95,8 +94,12 @@ export async function makeCockpitGraphQLSchema(
   // Add user-provided transforms
   allTransforms.push(...transforms);
 
-  // Introspect and wrap the schema
-  const introspectedSchema = await schemaFromExecutor(executor);
+  // Build the introspected schema. When a pre-loaded introspection JSON is
+  // provided, use it (decouples boot from cockpit reachability). Otherwise
+  // fall back to fetching introspection live via the executor.
+  const introspectedSchema = introspection
+    ? buildClientSchema(introspection)
+    : await schemaFromExecutor(executor);
 
   return wrapSchema({
     schema: introspectedSchema,

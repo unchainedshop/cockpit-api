@@ -7,8 +7,10 @@ import type {
   ContentListQueryOptions,
   CockpitListResponse,
 } from "./content.ts";
+import { normalizeListResponse } from "./content.ts";
 import type { CockpitAsset } from "./assets.ts";
 import { requireParam } from "../core/validation.ts";
+import { hashOpts } from "../core/cache.ts";
 
 export interface PageByIdOptions {
   locale?: string;
@@ -100,19 +102,12 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
         locale,
         queryParams: { ...queryParams, limit, skip, sort, filter, fields },
       });
-      const result = await ctx.http.fetch<T[] | CockpitListResponse<T>>(url);
-
-      // Normalize response to always return { data, meta? }
-      // Note: The Cockpit /api/pages/pages endpoint returns a raw array even when skip
-      // is provided, unlike /api/content/items/{model} which returns { data, meta }.
-      // This means meta.total will not be available for pages() method.
-      if (result === null) {
-        return null;
-      }
-      if (Array.isArray(result)) {
-        return { data: result };
-      }
-      return result;
+      const key = `pages:list:${locale}:${hashOpts({ limit, skip, sort, filter, fields, queryParams })}`;
+      return ctx.cache.swr<CockpitListResponse<T>>(key, async () =>
+        normalizeListResponse<T>(
+          await ctx.http.fetch<T[] | CockpitListResponse<T>>(url),
+        ),
+      );
     },
 
     async pageById<T = CockpitPage>(
@@ -125,7 +120,8 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
         locale,
         queryParams: { populate },
       });
-      return ctx.http.fetch<T>(url);
+      const key = `pages:id:${locale}:${id}:${String(populate ?? 0)}`;
+      return ctx.cache.swr<T>(key, () => ctx.http.fetch<T>(url));
     },
 
     async pageByRoute<T = CockpitPage>(
@@ -143,23 +139,22 @@ export function createPagesMethods(ctx: MethodContext): PagesMethods {
         queryParams: { route, ...queryOptions },
       });
 
-      const result = await ctx.http.fetch<T>(url);
+      const key = `pages:route:${locale}:${route}:${String(queryOptions.populate)}`;
+      const result = await ctx.cache.swr<T>(key, () => ctx.http.fetch<T>(url));
 
-      // If found, return it
       if (result) return result;
 
-      // If not found and fallback enabled and not in default locale
       if (fallbackToDefault && locale !== "default") {
-        // Try to find in default locale
         const defaultUrl = ctx.url.build("/pages/page", {
           locale: "default",
           queryParams: { route, ...queryOptions },
         });
-        const defaultResult = await ctx.http.fetch<T & { _id?: string }>(
-          defaultUrl,
+        const defaultKey = `pages:route:default:${route}:${String(queryOptions.populate)}`;
+        const defaultResult = await ctx.cache.swr<T & { _id?: string }>(
+          defaultKey,
+          () => ctx.http.fetch<T & { _id?: string }>(defaultUrl),
         );
 
-        // If found in default, get by ID in target locale
         if (defaultResult?._id != null && defaultResult._id !== "") {
           return this.pageById<T>(defaultResult._id, {
             locale,

@@ -5,6 +5,7 @@
 import type { HttpClient } from "../core/http.ts";
 import type { UrlBuilder } from "../core/url-builder.ts";
 import type { CacheManager } from "../core/cache.ts";
+import { hashOpts } from "../core/cache.ts";
 import { requireParam, validatePathSegment } from "../core/validation.ts";
 
 export interface MethodContext {
@@ -107,6 +108,14 @@ export interface CockpitListResponse<T> {
   meta?: CockpitListMeta;
 }
 
+export const normalizeListResponse = <T>(
+  result: T[] | CockpitListResponse<T> | null,
+): CockpitListResponse<T> | null => {
+  if (result === null) return null;
+  if (Array.isArray(result)) return { data: result };
+  return result;
+};
+
 export interface ContentMethods {
   getContentItem<T = unknown>(
     options: ContentItemQueryOptions,
@@ -189,7 +198,10 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
           queryParams,
         },
       );
-      return ctx.http.fetch<T>(url, buildFetchOptions(useAdminAccess));
+      const key = `content:${model}:item:${id ?? "_"}:${locale}:${hashOpts({ useAdminAccess, queryParams })}`;
+      return ctx.cache.swr<T>(key, () =>
+        ctx.http.fetch<T>(url, buildFetchOptions(useAdminAccess)),
+      );
     },
 
     async getContentItems<T = CockpitContentItem>(
@@ -221,19 +233,15 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
           populate,
         },
       });
-      const result = await ctx.http.fetch<T[] | CockpitListResponse<T>>(
-        url,
-        buildFetchOptions(useAdminAccess),
+      const key = `content:${model}:items:${locale}:${hashOpts({ limit, skip, sort, filter, fields, populate, useAdminAccess, queryParams })}`;
+      return ctx.cache.swr<CockpitListResponse<T>>(key, async () =>
+        normalizeListResponse<T>(
+          await ctx.http.fetch<T[] | CockpitListResponse<T>>(
+            url,
+            buildFetchOptions(useAdminAccess),
+          ),
+        ),
       );
-
-      // Normalize response to always return { data, meta? }
-      if (result === null) {
-        return null;
-      }
-      if (Array.isArray(result)) {
-        return { data: result };
-      }
-      return result;
     },
 
     async getUnchainedContentItems<T = CockpitContentItem>(
@@ -266,18 +274,12 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
           ...(includeUnpublished && { includeUnpublished: 1 }),
         },
       });
-      const result = await ctx.http.fetch<T[] | CockpitListResponse<T>>(url, {
-        useAdminAccess: true,
-      });
-
-      // Normalize response to always return { data, meta? }
-      if (result === null) {
-        return null;
-      }
-      if (Array.isArray(result)) {
-        return { data: result };
-      }
-      return result;
+      // Admin endpoint that may include unpublished items — not cached.
+      return normalizeListResponse<T>(
+        await ctx.http.fetch<T[] | CockpitListResponse<T>>(url, {
+          useAdminAccess: true,
+        }),
+      );
     },
 
     async getContentTree<T = CockpitContentItem>(
@@ -305,9 +307,12 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
           populate,
         },
       });
-      return ctx.http.fetch<CockpitTreeNode<T>[]>(
-        url,
-        buildFetchOptions(useAdminAccess),
+      const key = `content:${model}:tree:${locale}:${hashOpts({ parent, filter, fields, populate, useAdminAccess, queryParams })}`;
+      return ctx.cache.swr<CockpitTreeNode<T>[]>(key, () =>
+        ctx.http.fetch<CockpitTreeNode<T>[]>(
+          url,
+          buildFetchOptions(useAdminAccess),
+        ),
       );
     },
 
@@ -321,7 +326,8 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
         locale,
         queryParams: { pipeline },
       });
-      return ctx.http.fetch<T[]>(url);
+      const key = `content:${model}:aggregate:${locale}:${hashOpts({ pipeline })}`;
+      return ctx.cache.swr<T[]>(key, () => ctx.http.fetch<T[]>(url));
     },
 
     async postContentItem<T = unknown>(

@@ -4,6 +4,7 @@
 
 import { print, getOperationAST, type DocumentNode } from "graphql";
 import type { MethodContext } from "./content.ts";
+import { hashOpts } from "../core/cache.ts";
 
 export interface GraphQLMethods {
   graphQL<T = unknown>(
@@ -24,11 +25,14 @@ export function createGraphQLMethods(ctx: MethodContext): GraphQLMethods {
       const resolvedOperationName =
         operationName ?? getOperationAST(document)?.name?.value;
       const endpoint = ctx.url.graphqlEndpoint();
-      return ctx.http.post<T>(endpoint, {
-        query,
-        variables,
-        operationName: resolvedOperationName,
-      });
+      const key = `gql:${hashOpts({ query, variables: variables ?? null, operationName: resolvedOperationName ?? "" })}`;
+      return ctx.cache.swr<T>(key, () =>
+        ctx.http.post<T>(endpoint, {
+          query,
+          variables,
+          operationName: resolvedOperationName,
+        }),
+      );
     },
   };
 }

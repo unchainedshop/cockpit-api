@@ -171,16 +171,28 @@ describe("createRemoteExecutor", () => {
   it("reuses cached client for same tenant", async () => {
     const executor = createRemoteExecutor();
     const context = { req: { headers: { "x-cockpit-space": "cachedtenant" } } };
+    // Distinct documents to bypass the SWR cache on graphQL and exercise the
+    // client-pool reuse independently of response caching.
+    const docA: DocumentNode = {
+      kind: "Document",
+      definitions: [
+        { kind: "OperationDefinition", operation: "query", selectionSet: { kind: "SelectionSet", selections: [] }, name: { kind: "Name", value: "A" } },
+      ],
+    };
+    const docB: DocumentNode = {
+      kind: "Document",
+      definitions: [
+        { kind: "OperationDefinition", operation: "query", selectionSet: { kind: "SelectionSet", selections: [] }, name: { kind: "Name", value: "B" } },
+      ],
+    };
 
-    // First call creates the client
-    await executor({ document: mockDocument, context });
+    await executor({ document: docA, context });
     const firstCallCount = mockFetch.mock.calls.length;
 
-    // Second call should reuse the cached client
-    await executor({ document: mockDocument, context });
+    await executor({ document: docB, context });
     const secondCallCount = mockFetch.mock.calls.length;
 
-    // Second call should only add 1 fetch (for GraphQL), not create new client
+    // Second call adds exactly 1 fetch (the GraphQL call); no client-creation refetch.
     assert.strictEqual(secondCallCount - firstCallCount, 1);
   });
 

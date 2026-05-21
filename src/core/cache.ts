@@ -4,7 +4,26 @@
  * v3.0.0 Breaking Change: All cache operations are now async
  */
 
+import { createHash } from "node:crypto";
 import { LRUCache } from "lru-cache";
+import { logger } from "../cockpit-logger.ts";
+
+export const DEFAULT_SWR_FRESH_MS: number = 60 * 60 * 1000;
+export const DEFAULT_SWR_STALE_MS: number = 30 * 24 * 60 * 60 * 1000;
+
+export const hashOpts = (opts: unknown): string =>
+  createHash("sha1").update(JSON.stringify(opts)).digest("hex");
+
+interface SwrEnvelope<T> {
+  data: T;
+  freshUntil: number;
+  staleUntil: number;
+}
+
+export interface SwrOptions {
+  freshMs?: number;
+  staleMs?: number;
+}
 
 /**
  * Async cache store interface that custom cache implementations must implement
@@ -165,6 +184,22 @@ export interface CacheManager {
    * @returns Promise that resolves when clearing is complete
    */
   clear(pattern?: string): Promise<void>;
+
+  /**
+   * Stale-while-revalidate fetch wrapper.
+   *
+   * - Fresh hit (now < freshUntil): returns cached data immediately.
+   * - Stale hit (freshUntil <= now < staleUntil): returns cached data and
+   *   triggers a single background revalidation (deduped per-instance).
+   * - Cold or expired: fetches synchronously, deduping concurrent callers
+   *   for the same key. On upstream error, falls back to stale data if
+   *   present; otherwise rethrows.
+   */
+  swr<T>(
+    key: string,
+    fetcher: () => Promise<T | null>,
+    options?: SwrOptions,
+  ): Promise<T | null>;
 }
 
 /**
@@ -246,8 +281,9 @@ export function createCacheManager(
   const store = options.store ?? createDefaultLRUStore(options);
 
   const prefixedKey = (key: string): string => `${cachePrefix}${key}`;
+  const inflight = new Map<string, Promise<unknown>>();
 
-  return {
+  const manager: CacheManager = {
     async get(key: string): Promise<unknown> {
       return await store.get(prefixedKey(key));
     },
@@ -261,7 +297,73 @@ export function createCacheManager(
         pattern !== undefined ? `${cachePrefix}${pattern}` : cachePrefix;
       await store.clear(prefix);
     },
+
+    async swr<T>(
+      key: string,
+      fetcher: () => Promise<T | null>,
+      swrOptions: SwrOptions = {},
+    ): Promise<T | null> {
+      const freshMs = swrOptions.freshMs ?? DEFAULT_SWR_FRESH_MS;
+      const staleMs = swrOptions.staleMs ?? DEFAULT_SWR_STALE_MS;
+      const now = Date.now();
+      const entry = (await manager.get(key)) as SwrEnvelope<T> | undefined;
+      const isEnvelope =
+        entry !== undefined &&
+        typeof entry === "object" &&
+        "freshUntil" in entry;
+
+      if (isEnvelope && now < entry.freshUntil) {
+        return entry.data;
+      }
+
+      const runFetch = async (): Promise<T | null> => {
+        const fresh = await fetcher();
+        if (fresh !== null && fresh !== undefined) {
+          const t = Date.now();
+          await manager.set(key, {
+            data: fresh,
+            freshUntil: t + freshMs,
+            staleUntil: t + staleMs,
+          });
+        }
+        return fresh;
+      };
+
+      if (isEnvelope && now < entry.staleUntil) {
+        if (!inflight.has(key)) {
+          const revalidate = runFetch()
+            .catch((err: unknown) => {
+              logger.warn(`SWR background revalidate failed for ${key}`, err);
+              return null;
+            })
+            .finally(() => {
+              inflight.delete(key);
+            });
+          inflight.set(key, revalidate);
+        }
+        return entry.data;
+      }
+
+      let promise = inflight.get(key) as Promise<T | null> | undefined;
+      if (!promise) {
+        promise = runFetch().finally(() => {
+          inflight.delete(key);
+        });
+        inflight.set(key, promise);
+      }
+      try {
+        return await promise;
+      } catch (err) {
+        if (isEnvelope) {
+          logger.warn(`Cockpit unreachable, serving stale for ${key}`, err);
+          return entry.data;
+        }
+        throw err;
+      }
+    },
   };
+
+  return manager;
 }
 
 /**
@@ -291,6 +393,13 @@ export function createNoOpCacheManager(): CacheManager {
 
     async clear(): Promise<void> {
       // No-op
+    },
+
+    async swr<T>(
+      _key: string,
+      fetcher: () => Promise<T | null>,
+    ): Promise<T | null> {
+      return fetcher();
     },
   };
 }

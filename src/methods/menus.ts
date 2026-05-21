@@ -59,7 +59,8 @@ export function createMenuMethods(ctx: MethodContext): MenuMethods {
         locale,
         queryParams: { inactive },
       });
-      return ctx.http.fetch<T[]>(url);
+      const key = `pages:menus:${locale}:${inactive ? "1" : "0"}`;
+      return ctx.cache.swr<T[]>(key, () => ctx.http.fetch<T[]>(url));
     },
 
     async pagesMenu<T = CockpitMenu>(
@@ -72,7 +73,8 @@ export function createMenuMethods(ctx: MethodContext): MenuMethods {
         locale,
         queryParams: { inactive },
       });
-      return ctx.http.fetch<T>(url);
+      const key = `pages:menu:${name}:${locale}:${inactive ? "1" : "0"}`;
+      return ctx.cache.swr<T>(key, () => ctx.http.fetch<T>(url));
     },
   };
 }

@@ -188,19 +188,45 @@ describe("createConfig", () => {
   });
 
   describe("cachePrefix", () => {
-    it("generates cachePrefix with endpoint and default tenant", () => {
+    it("generates cachePrefix with static namespace, endpoint, and default tenant", () => {
       const config = createConfig({
         endpoint: "https://example.com/api",
       });
-      assert.strictEqual(config.cachePrefix, "https://example.com/api:default:");
+      assert.strictEqual(
+        config.cachePrefix,
+        "cockpit-api:https://example.com/api:default:",
+      );
     });
 
-    it("generates cachePrefix with endpoint and tenant", () => {
+    it("generates cachePrefix with static namespace, endpoint, and tenant", () => {
       const config = createConfig({
         endpoint: "https://example.com/api",
         tenant: "mytenant",
       });
-      assert.strictEqual(config.cachePrefix, "https://example.com/api:mytenant:");
+      assert.strictEqual(
+        config.cachePrefix,
+        "cockpit-api:https://example.com/api:mytenant:",
+      );
+    });
+
+    it("isolates tenants from one another in a shared store", () => {
+      const a = createConfig({
+        endpoint: "https://example.com/api",
+        tenant: "tenantA",
+      });
+      const b = createConfig({
+        endpoint: "https://example.com/api",
+        tenant: "tenantB",
+      });
+      assert.notStrictEqual(a.cachePrefix, b.cachePrefix);
+      assert.ok(a.cachePrefix.startsWith("cockpit-api:"));
+      assert.ok(b.cachePrefix.startsWith("cockpit-api:"));
+    });
+
+    it("isolates endpoints from one another in a shared store", () => {
+      const a = createConfig({ endpoint: "https://a.example.com/api" });
+      const b = createConfig({ endpoint: "https://b.example.com/api" });
+      assert.notStrictEqual(a.cachePrefix, b.cachePrefix);
     });
   });
 

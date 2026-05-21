@@ -311,3 +311,199 @@ describe("cache prefix handling", () => {
     assert.strictEqual(await cache2.get("key"), "value2");
   });
 });
+
+describe("cache.swr", () => {
+  it("fetches on cold cache and caches the result", async () => {
+    const cache = createCacheManager("swr:");
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return { v: "fresh" };
+    };
+
+    const first = await cache.swr("k", fetcher);
+    const second = await cache.swr("k", fetcher);
+
+    assert.deepStrictEqual(first, { v: "fresh" });
+    assert.deepStrictEqual(second, { v: "fresh" });
+    assert.strictEqual(calls, 1, "second fresh-hit must not re-fetch");
+  });
+
+  it("does not cache null results", async () => {
+    const cache = createCacheManager("swr:");
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return null;
+    };
+
+    await cache.swr("k", fetcher);
+    await cache.swr("k", fetcher);
+
+    assert.strictEqual(calls, 2, "null results must not be cached");
+  });
+
+  it("dedupes concurrent cold-cache callers (thundering herd)", async () => {
+    const cache = createCacheManager("swr:");
+    let calls = 0;
+    const resolvers: Array<(v: { v: string }) => void> = [];
+    const fetcher = () => {
+      calls += 1;
+      return new Promise<{ v: string }>((resolve) => {
+        resolvers.push(resolve);
+      });
+    };
+
+    const inflightPromises = [
+      cache.swr("hot", fetcher),
+      cache.swr("hot", fetcher),
+      cache.swr("hot", fetcher),
+    ];
+
+    // Yield so the deduped fetcher invocation registers its resolver.
+    await new Promise<void>((r) => setImmediate(r));
+    assert.strictEqual(resolvers.length, 1, "fetcher should be invoked once");
+
+    resolvers[0]({ v: "shared" });
+    const results = await Promise.all(inflightPromises);
+
+    assert.strictEqual(calls, 1, "thundering herd must collapse to one fetch");
+    for (const r of results) {
+      assert.deepStrictEqual(r, { v: "shared" });
+    }
+  });
+
+  it("serves stale data on upstream error if envelope exists", async () => {
+    const cache = createCacheManager("swr:");
+    // Seed an expired envelope manually
+    await cache.set("k", {
+      data: { v: "stale" },
+      freshUntil: 0,
+      staleUntil: 0,
+    });
+
+    const result = await cache.swr("k", async () => {
+      throw new Error("upstream down");
+    });
+
+    assert.deepStrictEqual(result, { v: "stale" });
+  });
+
+  it("rethrows upstream errors when no envelope exists", async () => {
+    const cache = createCacheManager("swr:");
+    await assert.rejects(
+      () =>
+        cache.swr("k", async () => {
+          throw new Error("upstream down");
+        }),
+      { message: "upstream down" },
+    );
+  });
+
+  it("serves stale immediately and revalidates in background", async () => {
+    const cache = createCacheManager("swr:");
+    const now = Date.now();
+    // Seed a stale-but-not-expired envelope
+    await cache.set("k", {
+      data: { v: "old" },
+      freshUntil: now - 1000,
+      staleUntil: now + 60_000,
+    });
+
+    let calls = 0;
+    let resolveFetch: (v: { v: string }) => void = () => {};
+    const fetcher = () => {
+      calls += 1;
+      return new Promise<{ v: string }>((resolve) => {
+        resolveFetch = resolve;
+      });
+    };
+
+    const result = await cache.swr("k", fetcher);
+    assert.deepStrictEqual(result, { v: "old" }, "must serve stale synchronously");
+    assert.strictEqual(calls, 1, "must trigger one background revalidate");
+
+    // Let the background revalidation complete and write through
+    resolveFetch({ v: "new" });
+    await new Promise<void>((r) => setImmediate(r));
+
+    const next = await cache.swr("k", fetcher);
+    assert.deepStrictEqual(next, { v: "new" }, "next call must see refreshed data");
+    assert.strictEqual(calls, 1, "background revalidate must dedupe");
+  });
+
+  it("isolates inflight maps across cache manager instances", async () => {
+    const cacheA = createCacheManager("tenantA:");
+    const cacheB = createCacheManager("tenantB:");
+
+    let callsA = 0;
+    let callsB = 0;
+    const resolversA: Array<(v: string) => void> = [];
+    const resolversB: Array<(v: string) => void> = [];
+
+    const promiseA = cacheA.swr<string>("same-key", () => {
+      callsA += 1;
+      return new Promise((resolve) => resolversA.push(resolve));
+    });
+    const promiseB = cacheB.swr<string>("same-key", () => {
+      callsB += 1;
+      return new Promise((resolve) => resolversB.push(resolve));
+    });
+
+    await new Promise<void>((r) => setImmediate(r));
+    assert.strictEqual(resolversA.length, 1);
+    assert.strictEqual(
+      resolversB.length,
+      1,
+      "tenant B must not be deduped against tenant A",
+    );
+
+    resolversA[0]("A");
+    resolversB[0]("B");
+
+    assert.strictEqual(await promiseA, "A");
+    assert.strictEqual(await promiseB, "B");
+    assert.strictEqual(callsA, 1);
+    assert.strictEqual(callsB, 1);
+  });
+
+  it("respects custom freshMs and staleMs", async () => {
+    const cache = createCacheManager("swr:");
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return { v: calls };
+    };
+
+    // Tiny freshMs so the second call sees stale
+    await cache.swr("k", fetcher, { freshMs: 1, staleMs: 60_000 });
+    await new Promise<void>((r) => setTimeout(r, 5));
+
+    // Stale hit returns cached + triggers background refresh
+    const stale = await cache.swr("k", fetcher, {
+      freshMs: 1,
+      staleMs: 60_000,
+    });
+    assert.deepStrictEqual(stale, { v: 1 });
+
+    // Drain microtasks so the background revalidate completes
+    await new Promise<void>((r) => setImmediate(r));
+    assert.strictEqual(calls, 2);
+  });
+
+  it("noop cache.swr always invokes the fetcher (no caching)", async () => {
+    const cache = createNoOpCacheManager();
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return { v: calls };
+    };
+
+    const a = await cache.swr("k", fetcher);
+    const b = await cache.swr("k", fetcher);
+
+    assert.deepStrictEqual(a, { v: 1 });
+    assert.deepStrictEqual(b, { v: 2 });
+    assert.strictEqual(calls, 2);
+  });
+});

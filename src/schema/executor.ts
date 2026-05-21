@@ -2,7 +2,7 @@
  * Remote executor for Cockpit GraphQL schema stitching
  */
 
-import type { DocumentNode } from "graphql";
+import type { DocumentNode, IntrospectionQuery } from "graphql";
 import { LRUCache } from "lru-cache";
 import { CockpitAPI, type CockpitAPIClient } from "../client.ts";
 import type { CockpitAPIOptions } from "../core/config.ts";
@@ -44,6 +44,14 @@ export interface MakeCockpitSchemaOptions {
 
   /** Maximum number of clients to keep in the pool (default: 100) */
   maxClients?: number;
+
+  /**
+   * Pre-loaded introspection result. When provided, the package skips the
+   * live introspection HTTP call to cockpit and builds the schema from this
+   * snapshot via `buildClientSchema`. This decouples engine boot from cockpit
+   * reachability.
+   */
+  introspection?: IntrospectionQuery;
 }
 
 /**

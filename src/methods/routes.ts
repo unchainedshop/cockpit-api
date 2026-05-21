@@ -58,19 +58,25 @@ export function createRouteMethods(ctx: MethodContext): RouteMethods {
       locale = "default",
     ): Promise<T | null> {
       const url = ctx.url.build("/pages/routes", { locale });
-      return ctx.http.fetch<T>(url);
+      return ctx.cache.swr<T>(`pages:routes:${locale}`, () =>
+        ctx.http.fetch<T>(url),
+      );
     },
 
     async pagesSitemap<T = CockpitSitemapEntry>(): Promise<T[] | null> {
       const url = ctx.url.build("/pages/sitemap");
-      return ctx.http.fetch<T[]>(url);
+      return ctx.cache.swr<T[]>("pages:sitemap", () =>
+        ctx.http.fetch<T[]>(url),
+      );
     },
 
     async pagesSetting<T = CockpitSettings>(
       locale = "default",
     ): Promise<T | null> {
       const url = ctx.url.build("/pages/settings", { locale });
-      return ctx.http.fetch<T>(url);
+      return ctx.cache.swr<T>(`pages:settings:${locale}`, () =>
+        ctx.http.fetch<T>(url),
+      );
     },
 
     async getFullRouteForSlug(slug: string): Promise<string | undefined> {

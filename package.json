@@ -50,8 +50,8 @@
     "node": ">=25"
   },
   "dependencies": {
-    "@unchainedshop/logger": "^4.6.2",
-    "lru-cache": "^11.2.6"
+    "@unchainedshop/logger": "^4.8.11",
+    "lru-cache": "^11.5.0"
   },
   "types": "dist/index.d.ts",
   "peerDependencies": {
@@ -67,14 +67,15 @@
     }
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
-    "@types/node": "^25.3.1",
-    "eslint": "^9.39.2",
+    "@eslint/js": "^10.0.1",
+    "@graphql-tools/wrap": "11.1.15",
+    "@types/node": "^25.9.1",
+    "eslint": "^10.4.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
-    "graphql": "^16.13.0",
-    "prettier": "^3.8.1",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1"
+    "graphql": "^16.14.0",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.4"
   }
 }
