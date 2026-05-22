@@ -121,7 +121,15 @@ export interface CacheOptions {
   max?: number;
 
   /**
-   * Time-to-live in milliseconds (default: 100000)
+   * Time-to-live in milliseconds for the underlying LRU store.
+   *
+   * When unset, entries are not expired by time — only evicted when the LRU
+   * exceeds `max`. SWR manages its own freshness/staleness via the envelope
+   * timestamps (`freshUntil` / `staleUntil`), so leaving this unset is the
+   * right choice when relying on {@link CacheManager.swr}: a short LRU TTL
+   * would otherwise evict envelopes long before their stale window expires
+   * and defeat the "serve stale on upstream failure" fallback.
+   *
    * Only used with default LRU store. Ignored when custom store is provided.
    */
   ttl?: number;
@@ -233,9 +241,13 @@ export interface CacheManager {
  * Wraps lru-cache in async interface for consistency
  */
 function createDefaultLRUStore(options: CacheOptions): AsyncCacheStore {
+  // No LRU TTL by default: SWR manages freshness/staleness via the envelope
+  // timestamps. A short LRU TTL would evict envelopes before their stale
+  // window expires and defeat the "serve stale on upstream failure" fallback.
+  // Callers can still opt into a hard time-based eviction by passing `ttl`.
   const cache = new LRUCache<string, NonNullable<unknown>>({
     max: options.max ?? 100,
-    ttl: options.ttl ?? 100000,
+    ...(options.ttl !== undefined && { ttl: options.ttl }),
     allowStale: false,
   });
 
@@ -277,7 +289,6 @@ function createDefaultLRUStore(options: CacheOptions): AsyncCacheStore {
  * ```typescript
  * const cache = createCacheManager('https://cms.example.com:default:', {
  *   max: 100,
- *   ttl: 100000
  * });
  *
  * await cache.set('key1', { data: 'value' });

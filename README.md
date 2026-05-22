@@ -287,7 +287,10 @@ const cockpit = await CockpitAPI({
   preloadRoutes: true,          // Optional: preload route replacements
   cache: {
     max: 100,                   // Falls back to COCKPIT_CACHE_MAX (default: 100)
-    ttl: 100000,                // Falls back to COCKPIT_CACHE_TTL (default: 100000)
+    // ttl: 100000,             // Optional hard LRU TTL. Unset by default — SWR
+                                // manages freshness via envelope timestamps; setting
+                                // a TTL shorter than the SWR stale window will evict
+                                // envelopes before stale-on-failure can serve them.
     store: customStore,         // Optional: custom async cache store (Redis, Keyv, etc.)
   },
   // Or disable caching entirely
@@ -302,7 +305,8 @@ COCKPIT_GRAPHQL_ENDPOINT=https://your-cockpit-instance.com/api/graphql
 COCKPIT_SECRET=your-api-key                # Default API key
 COCKPIT_SECRET_MYTENANT=tenant-api-key     # Tenant-specific API key
 COCKPIT_CACHE_MAX=100                      # Max cache entries (default: 100)
-COCKPIT_CACHE_TTL=100000                   # Cache TTL in ms (default: 100000)
+COCKPIT_CACHE_TTL=                         # Optional hard LRU TTL (ms). Unset by default;
+                                           # SWR manages freshness via envelope timestamps.
 ```
 
 ## Multi-Tenant Support

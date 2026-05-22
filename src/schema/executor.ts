@@ -36,10 +36,10 @@ export interface MakeCockpitSchemaOptions {
     context: CockpitExecutorContext | undefined,
   ) => string | undefined;
 
-  /** CockpitAPI options to pass through (endpoint, apiKey, useAdminAccess, preloadRoutes) */
+  /** CockpitAPI options to pass through (endpoint, apiKey, useAdminAccess, preloadRoutes, cache) */
   cockpitOptions?: Pick<
     CockpitAPIOptions,
-    "endpoint" | "apiKey" | "useAdminAccess" | "preloadRoutes"
+    "endpoint" | "apiKey" | "useAdminAccess" | "preloadRoutes" | "cache"
   >;
 
   /** Maximum number of clients to keep in the pool (default: 100) */

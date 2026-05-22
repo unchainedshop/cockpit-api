@@ -18,7 +18,7 @@ All options fall back to environment variables when not explicitly provided:
 - `COCKPIT_SECRET` - Default API key (used when `useAdminAccess: true`)
 - `COCKPIT_SECRET_<TENANT>` - Tenant-specific API keys (e.g., `COCKPIT_SECRET_MYTENANT`)
 - `COCKPIT_CACHE_MAX` - Max cache entries (default: 100)
-- `COCKPIT_CACHE_TTL` - Cache TTL in milliseconds (default: 100000)
+- `COCKPIT_CACHE_TTL` - Optional hard cache TTL in milliseconds. Unset by default — the underlying LRU only evicts when `max` is exceeded. SWR manages freshness/staleness via envelope timestamps; setting a TTL shorter than the SWR stale window will evict envelopes before they can serve stale data on upstream failure.
 
 ## Architecture
 

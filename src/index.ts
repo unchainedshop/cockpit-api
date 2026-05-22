@@ -12,6 +12,8 @@ export type {
   CacheManager,
   CacheOptions,
   AsyncCacheStore,
+  SwrOptions,
+  SwrDefaults,
 } from "./core/cache.ts";
 
 export {
