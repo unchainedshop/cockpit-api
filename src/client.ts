@@ -252,6 +252,10 @@ export async function CockpitAPI(
       if (ttlValue !== undefined) cacheOptions.ttl = ttlValue;
     }
 
+    if (options.cache && "swr" in options.cache) {
+      cacheOptions.swr = options.cache.swr;
+    }
+
     cache = createCacheManager(config.cachePrefix, cacheOptions);
   }
 

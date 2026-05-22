@@ -26,6 +26,12 @@ export interface SwrOptions {
 }
 
 /**
+ * Manager-level SWR defaults. Applied when a `swr()` call omits per-call options.
+ * Falls back to {@link DEFAULT_SWR_FRESH_MS} / {@link DEFAULT_SWR_STALE_MS} if unset.
+ */
+export type SwrDefaults = SwrOptions;
+
+/**
  * Async cache store interface that custom cache implementations must implement
  *
  * @example Redis implementation
@@ -156,6 +162,26 @@ export interface CacheOptions {
    * ```
    */
   store?: AsyncCacheStore;
+
+  /**
+   * Default SWR windows applied to every {@link CacheManager.swr} call that
+   * doesn't supply per-call `freshMs` / `staleMs`. Useful for configuring
+   * stale-while-revalidate behaviour centrally without touching every method.
+   *
+   * Per-call options on `swr()` still win. Unset fields fall back to
+   * {@link DEFAULT_SWR_FRESH_MS} and {@link DEFAULT_SWR_STALE_MS}.
+   *
+   * @example 5-minute fresh window, 24-hour stale fallback (survives upstream outages)
+   * ```typescript
+   * const client = await CockpitAPI({
+   *   cache: {
+   *     store: redisStore,
+   *     swr: { freshMs: 5 * 60_000, staleMs: 24 * 60 * 60_000 },
+   *   }
+   * });
+   * ```
+   */
+  swr?: SwrDefaults;
 }
 
 /**
@@ -280,6 +306,7 @@ export function createCacheManager(
   // Use custom store if provided, otherwise create default LRU store
   const store = options.store ?? createDefaultLRUStore(options);
 
+  const managerSwrDefaults: SwrDefaults = options.swr ?? {};
   const prefixedKey = (key: string): string => `${cachePrefix}${key}`;
   const inflight = new Map<string, Promise<unknown>>();
 
@@ -303,8 +330,14 @@ export function createCacheManager(
       fetcher: () => Promise<T | null>,
       swrOptions: SwrOptions = {},
     ): Promise<T | null> {
-      const freshMs = swrOptions.freshMs ?? DEFAULT_SWR_FRESH_MS;
-      const staleMs = swrOptions.staleMs ?? DEFAULT_SWR_STALE_MS;
+      const freshMs =
+        swrOptions.freshMs ??
+        managerSwrDefaults.freshMs ??
+        DEFAULT_SWR_FRESH_MS;
+      const staleMs =
+        swrOptions.staleMs ??
+        managerSwrDefaults.staleMs ??
+        DEFAULT_SWR_STALE_MS;
       const now = Date.now();
       const entry = (await manager.get(key)) as SwrEnvelope<T> | undefined;
       const isEnvelope =

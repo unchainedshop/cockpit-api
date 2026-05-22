@@ -491,6 +491,55 @@ describe("cache.swr", () => {
     assert.strictEqual(calls, 2);
   });
 
+  it("uses manager-level swr defaults when per-call options are omitted", async () => {
+    const cache = createCacheManager("swr:", {
+      swr: { freshMs: 1, staleMs: 60_000 },
+    });
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return { v: calls };
+    };
+
+    await cache.swr("k", fetcher);
+    await new Promise<void>((r) => setTimeout(r, 5));
+
+    // With managerSwrDefaults.freshMs = 1ms, the second call is a stale hit:
+    // serves cached value synchronously and kicks off a background refetch.
+    const stale = await cache.swr("k", fetcher);
+    assert.deepStrictEqual(stale, { v: 1 });
+
+    await new Promise<void>((r) => setImmediate(r));
+    assert.strictEqual(
+      calls,
+      2,
+      "background revalidate must run under manager defaults",
+    );
+  });
+
+  it("per-call swr options override manager-level defaults", async () => {
+    const cache = createCacheManager("swr:", {
+      swr: { freshMs: 1, staleMs: 60_000 },
+    });
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return { v: calls };
+    };
+
+    await cache.swr("k", fetcher, { freshMs: 60_000, staleMs: 60_000 });
+    await new Promise<void>((r) => setTimeout(r, 5));
+
+    // Per-call freshMs=60s wins over manager freshMs=1ms — second call is a
+    // fresh hit and must not refetch.
+    const fresh = await cache.swr("k", fetcher, {
+      freshMs: 60_000,
+      staleMs: 60_000,
+    });
+    assert.deepStrictEqual(fresh, { v: 1 });
+    assert.strictEqual(calls, 1, "per-call options must override manager defaults");
+  });
+
   it("noop cache.swr always invokes the fetcher (no caching)", async () => {
     const cache = createNoOpCacheManager();
     let calls = 0;
