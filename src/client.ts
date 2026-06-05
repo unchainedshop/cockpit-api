@@ -275,7 +275,10 @@ export async function CockpitAPI(
     tenant?: string;
     replacements: Record<string, string>;
   } = {
-    baseUrl: config.publicUrl ?? config.endpoint.origin,
+    // An empty baseUrl makes the transformer emit host-relative asset paths.
+    baseUrl: config.relativeAssetPaths
+      ? ""
+      : (config.publicUrl ?? config.endpoint.origin),
     replacements: routeReplacements,
   };
   if (options.tenant) transformerConfig.tenant = options.tenant;

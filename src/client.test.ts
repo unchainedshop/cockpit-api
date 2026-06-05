@@ -1452,4 +1452,41 @@ describe('Extended API methods', () => {
       assert.strictEqual(mockFetch.mock.calls.length, 0);
     });
   });
+
+  describe('relativeAssetPaths', () => {
+    const itemWithAsset = { _id: '1', cover: { path: '/2026/01/x.jpg' } };
+
+    it('rewrites asset paths to absolute (endpoint origin) by default', async () => {
+      mockFetch = mock.fn(async () => createMockResponse({ body: itemWithAsset }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, cache: false });
+      const result = await client.getContentItem<{ cover: { path: string } }>({
+        model: 'posts',
+        id: '1',
+      });
+
+      assert.strictEqual(
+        result?.cover.path,
+        'https://test.cockpit.com/storage/uploads/2026/01/x.jpg'
+      );
+    });
+
+    it('leaves asset paths host-relative when relativeAssetPaths is true', async () => {
+      mockFetch = mock.fn(async () => createMockResponse({ body: itemWithAsset }));
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        cache: false,
+        relativeAssetPaths: true,
+      });
+      const result = await client.getContentItem<{ cover: { path: string } }>({
+        model: 'posts',
+        id: '1',
+      });
+
+      assert.strictEqual(result?.cover.path, '/storage/uploads/2026/01/x.jpg');
+    });
+  });
 });

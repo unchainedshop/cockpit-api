@@ -92,6 +92,27 @@ export interface CockpitAPIOptions {
    */
   publicUrl?: string;
   /**
+   * Emit asset paths as host-relative (`/storage/uploads/…`) instead of
+   * absolute. Useful when the fetch endpoint differs from the browser-facing
+   * host (e.g. the client talks to Cockpit over an internal Docker hostname
+   * while the browser loads assets from a public URL): emit relative paths and
+   * let the consuming app prepend its own public origin.
+   *
+   * When `true`, `publicUrl`/`endpoint.origin` are ignored for asset rewriting
+   * and the transformer leaves paths host-relative. Falls back to the
+   * `COCKPIT_RELATIVE_ASSET_PATHS=true` env var.
+   *
+   * @default false
+   * @example
+   * ```typescript
+   * const client = await CockpitAPI({
+   *   endpoint: 'http://cms-internal:80/api/gql', // internal fetch host
+   *   relativeAssetPaths: true,                   // -> "path":"/storage/uploads/x.jpg"
+   * });
+   * ```
+   */
+  relativeAssetPaths?: boolean;
+  /**
    * Preload route replacements during client initialization.
    * When true, fetches page routes to enable `pages://id` link resolution in responses.
    * When false (default), skips the network request for faster cold starts.
@@ -107,6 +128,7 @@ export interface CockpitConfig {
   readonly useAdminAccess: boolean;
   readonly defaultLanguage: string | null;
   readonly publicUrl?: string;
+  readonly relativeAssetPaths: boolean;
   readonly cachePrefix: string;
 }
 
@@ -142,12 +164,16 @@ export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
   const apiKey = resolveApiKey(tenant, options);
   const publicUrl =
     options.publicUrl ?? process.env["COCKPIT_PUBLIC_URL"] ?? undefined;
+  const relativeAssetPaths =
+    options.relativeAssetPaths ??
+    process.env["COCKPIT_RELATIVE_ASSET_PATHS"] === "true";
 
   // Build config object with all properties before freezing
   const config: CockpitConfig = Object.freeze({
     endpoint,
     useAdminAccess: options.useAdminAccess ?? false,
     defaultLanguage: options.defaultLanguage ?? null,
+    relativeAssetPaths,
     cachePrefix: `cockpit-api:${endpointStr}:${tenant ?? "default"}:`,
     ...(tenant && { tenant }),
     ...(apiKey !== undefined && { apiKey }),

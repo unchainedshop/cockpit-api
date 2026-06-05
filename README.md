@@ -284,6 +284,8 @@ const cockpit = await CockpitAPI({
   apiKey: 'your-api-key',       // Falls back to COCKPIT_SECRET env var
   useAdminAccess: true,         // Optional: inject api-Key header
   defaultLanguage: 'de',        // Language that maps to Cockpit's "default" locale (default: "de")
+  publicUrl: 'https://...',     // Optional: rewrite asset paths to this origin (default: endpoint.origin)
+  relativeAssetPaths: true,     // Optional: emit host-relative asset paths (default: false)
   preloadRoutes: true,          // Optional: preload route replacements
   cache: {
     max: 100,                   // Falls back to COCKPIT_CACHE_MAX (default: 100)
@@ -307,7 +309,22 @@ COCKPIT_SECRET_MYTENANT=tenant-api-key     # Tenant-specific API key
 COCKPIT_CACHE_MAX=100                      # Max cache entries (default: 100)
 COCKPIT_CACHE_TTL=                         # Optional hard LRU TTL (ms). Unset by default;
                                            # SWR manages freshness via envelope timestamps.
+COCKPIT_PUBLIC_URL=https://cms.example.com # Origin used when rewriting asset paths
+COCKPIT_RELATIVE_ASSET_PATHS=true          # Emit host-relative asset paths instead (default: false)
 ```
+
+### Asset path rewriting
+
+Cockpit returns asset paths like `"path":"/2026/01/x.jpg"`. By default the client
+rewrites these to absolute URLs against `publicUrl ?? endpoint.origin`, e.g.
+`https://cms.example.com/storage/uploads/2026/01/x.jpg`.
+
+When the client fetches over an **internal** host (e.g. a Docker service name) but
+the **browser** loads assets from a different public host, absolute paths would
+bake in the unreachable internal origin. Set `relativeAssetPaths: true` to emit
+host-relative paths (`/storage/uploads/2026/01/x.jpg`) and let the consuming app
+prepend its own public origin. This applies to both the main client and the
+stitched GraphQL schema (pass it via `cockpitOptions` to `makeCockpitGraphQLSchema`).
 
 ## Multi-Tenant Support
 

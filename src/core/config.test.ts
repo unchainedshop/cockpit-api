@@ -187,6 +187,36 @@ describe("createConfig", () => {
     });
   });
 
+  describe("relativeAssetPaths configuration", () => {
+    it("defaults to false", () => {
+      const config = createConfig({ endpoint: "https://example.com/api" });
+      assert.strictEqual(config.relativeAssetPaths, false);
+    });
+
+    it("sets relativeAssetPaths when provided", () => {
+      const config = createConfig({
+        endpoint: "https://example.com/api",
+        relativeAssetPaths: true,
+      });
+      assert.strictEqual(config.relativeAssetPaths, true);
+    });
+
+    it("falls back to COCKPIT_RELATIVE_ASSET_PATHS env var", () => {
+      env.set({ COCKPIT_RELATIVE_ASSET_PATHS: "true" });
+      const config = createConfig({ endpoint: "https://example.com/api" });
+      assert.strictEqual(config.relativeAssetPaths, true);
+    });
+
+    it("option takes precedence over env var", () => {
+      env.set({ COCKPIT_RELATIVE_ASSET_PATHS: "true" });
+      const config = createConfig({
+        endpoint: "https://example.com/api",
+        relativeAssetPaths: false,
+      });
+      assert.strictEqual(config.relativeAssetPaths, false);
+    });
+  });
+
   describe("cachePrefix", () => {
     it("generates cachePrefix with static namespace, endpoint, and default tenant", () => {
       const config = createConfig({
