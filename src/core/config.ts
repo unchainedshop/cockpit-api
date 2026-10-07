@@ -113,9 +113,11 @@ export interface CockpitAPIOptions {
    */
   relativeAssetPaths?: boolean;
   /**
-   * Preload route replacements during client initialization.
-   * When true, fetches page routes to enable `pages://id` link resolution in responses.
-   * When false (default), skips the network request for faster cold starts.
+   * Resolve `pages://id` links in responses to their page routes.
+   * The route map is cached with stale-while-revalidate like other reads and
+   * looked up per response, so long-lived clients follow moved pages within
+   * the fresh window. With `cache: false` it is fetched once, at creation.
+   * When false (default), links are left as-is and no route map is fetched.
    * @default false
    */
   preloadRoutes?: boolean;

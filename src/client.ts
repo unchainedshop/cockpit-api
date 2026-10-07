@@ -10,8 +10,11 @@ import {
   type CacheOptions,
 } from "./core/cache.ts";
 import { createUrlBuilder } from "./core/url-builder.ts";
-import { createHttpClient } from "./core/http.ts";
-import { createImagePathTransformer } from "./transformers/image-path.ts";
+import { createHttpClient, type TransformerSource } from "./core/http.ts";
+import {
+  createImagePathTransformer,
+  type ResponseTransformer,
+} from "./transformers/image-path.ts";
 import { generateCmsRouteReplacements } from "./utils/route-map.ts";
 
 import {
@@ -259,30 +262,33 @@ export async function CockpitAPI(
     cache = createCacheManager(config.cachePrefix, cacheOptions);
   }
 
-  // Generate route replacements for image path transformer (optional)
-  const routeReplacements =
-    options.preloadRoutes === true
-      ? await generateCmsRouteReplacements(
-          endpointString,
-          options.tenant,
-          cache,
-        )
-      : {};
-
   // Create response transformer
-  const transformerConfig: {
-    baseUrl: string;
-    tenant?: string;
-    replacements: Record<string, string>;
-  } = {
+  const assetConfig = {
     // An empty baseUrl makes the transformer emit host-relative asset paths.
     baseUrl: config.relativeAssetPaths
       ? ""
       : (config.publicUrl ?? config.endpoint.origin),
-    replacements: routeReplacements,
+    ...(options.tenant && { tenant: options.tenant }),
   };
-  if (options.tenant) transformerConfig.tenant = options.tenant;
-  const transformer = createImagePathTransformer(transformerConfig);
+  const createTransformer = (
+    replacements: Record<string, string>,
+  ): ResponseTransformer =>
+    createImagePathTransformer({ ...assetConfig, replacements });
+
+  // Resolve pages://id links (optional). The route map is read through the
+  // SWR cache for every response instead of being captured here, so
+  // long-lived clients pick up moved pages within the fresh window. Without a
+  // cache that would refetch it per response, so it is fetched once instead.
+  const resolveRouteTransformer = async (): Promise<ResponseTransformer> =>
+    createTransformer(
+      await generateCmsRouteReplacements(endpointString, options.tenant, cache),
+    );
+  const transformer: TransformerSource =
+    options.preloadRoutes !== true
+      ? createTransformer({})
+      : options.cache === false
+        ? await resolveRouteTransformer()
+        : resolveRouteTransformer;
 
   // Create URL builder
   const urlBuilder = createUrlBuilder(config);

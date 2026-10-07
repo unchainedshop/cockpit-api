@@ -286,7 +286,7 @@ const cockpit = await CockpitAPI({
   defaultLanguage: 'de',        // Language that maps to Cockpit's "default" locale (default: "de")
   publicUrl: 'https://...',     // Optional: rewrite asset paths to this origin (default: endpoint.origin)
   relativeAssetPaths: true,     // Optional: emit host-relative asset paths (default: false)
-  preloadRoutes: true,          // Optional: preload route replacements
+  preloadRoutes: true,          // Optional: resolve pages://id links (route map cached with SWR)
   cache: {
     max: 100,                   // Falls back to COCKPIT_CACHE_MAX (default: 100)
     // ttl: 100000,             // Optional hard LRU TTL. Unset by default — SWR
@@ -491,6 +491,12 @@ cockpit.clearCache('ROUTE');
 await cockpit.clearCache();
 await cockpit.clearCache('ROUTE');
 ```
+
+### v2.8.0
+
+- Route maps (`pages://id` replacements and the slug map behind `getFullRouteForSlug()`) are cached with stale-while-revalidate like every other read: fresh for `swr.freshMs`, then served stale while they refresh in the background. A failed refresh keeps the last good map instead of caching an empty one.
+- `preloadRoutes` no longer fetches at client creation. The route map is looked up per upstream response, so long-lived clients (including the schema executor's pool) follow moved pages. With `cache: false` it is still fetched once at creation.
+- Cache keys are now `ROUTE_REPLACEMENT_MAP:v2:<tenant>` and `SLUG_ROUTE_MAP:v2:<tenant>` (envelope values); entries under the old keys are no longer read and expire on their own. Prefix-based flushes like `ROUTE_REPLACEMENT_MAP:` still match.
 
 ### v3.0.0 (Breaking Changes)
 
