@@ -80,7 +80,7 @@ src/
 
 ### Key Patterns
 
-**Async initialization**: `CockpitAPI(options?)` returns a Promise. It optionally preloads route replacements for `pages://id` link resolution.
+**Async initialization**: `CockpitAPI(options?)` returns a Promise. With `preloadRoutes`, `pages://id` links are resolved per response from an SWR-cached route map (fetched once at creation only when `cache: false`).
 
 **Configuration with fallbacks**: All options fall back to environment variables (e.g., `COCKPIT_GRAPHQL_ENDPOINT`, `COCKPIT_CACHE_MAX`).
 

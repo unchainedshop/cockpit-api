@@ -66,6 +66,27 @@ describe("createHttpClient", () => {
       assert.deepStrictEqual(result, { value: 20 });
     });
 
+    it("resolves a transformer factory for every JSON response", async () => {
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ body: { value: 10 } })),
+      );
+      let resolved = 0;
+      const client = createHttpClient(createTestConfig(), async () => {
+        resolved += 1;
+        return doubleTransformer;
+      });
+
+      assert.deepStrictEqual(await client.fetch("https://test.example.com/api/a"), { value: 20 });
+      assert.deepStrictEqual(await client.fetch("https://test.example.com/api/b"), { value: 20 });
+      assert.strictEqual(resolved, 2);
+
+      mockFetch.mock.mockImplementation(() =>
+        Promise.resolve(createMockResponse({ ok: false, status: 404 })),
+      );
+      assert.strictEqual(await client.fetch("https://test.example.com/api/missing"), null);
+      assert.strictEqual(resolved, 2); // nothing to transform
+    });
+
     it("returns null for 404 responses", async () => {
       mockFetch.mock.mockImplementation(() =>
         Promise.resolve(createMockResponse({ ok: false, status: 404 })),

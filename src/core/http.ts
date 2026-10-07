@@ -88,11 +88,20 @@ function prepareJsonRequestOptions(
 }
 
 /**
+ * A response transformer, or a factory resolved for every JSON response so
+ * the transformation can depend on state that changes over the client's
+ * lifetime (e.g. the cached page-link route map).
+ */
+export type TransformerSource =
+  | ResponseTransformer
+  | (() => Promise<ResponseTransformer>);
+
+/**
  * Creates an HTTP client with authentication and response transformation
  */
 export function createHttpClient(
   config: CockpitConfig,
-  transformer: ResponseTransformer,
+  transformer: TransformerSource,
 ): HttpClient {
   /**
    * Build headers with optional admin access override
@@ -129,8 +138,10 @@ export function createHttpClient(
     if (response.status === 404) return null;
     if (!response.ok) return handleErrorResponse(response);
 
-    const json = await response.json();
-    return transformer.transform(json) as T;
+    const json: unknown = await response.json();
+    const resolved =
+      typeof transformer === "function" ? await transformer() : transformer;
+    return resolved.transform(json) as T;
   };
 
   const handleTextResponse = async (

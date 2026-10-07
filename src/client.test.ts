@@ -1424,21 +1424,64 @@ describe('Extended API methods', () => {
   });
 
   describe('preloadRoutes option', () => {
-    it('preloads route replacements when preloadRoutes is true', async () => {
-      const mockResponse = [
-        { _id: 'page1', _r: '/about', slug: 'about' },
-        { _id: 'page2', _r: '/contact', slug: 'contact' },
-      ];
-      mockFetch = mock.fn(async () => createMockResponse({ body: mockResponse }));
+    // Serves the route map for /pages/pages and an item linking pages://page1 otherwise
+    const routeAwareFetch = (route: () => string) =>
+      mock.fn(async (url: string | URL) =>
+        url.toString().includes('/pages/pages')
+          ? createMockResponse({ body: [{ _id: 'page1', _r: route() }] })
+          : createMockResponse({ body: { link: 'pages://page1' } }),
+      );
+
+    const linkOf = async (client: Awaited<ReturnType<typeof CockpitAPI>>, id: string) =>
+      (await client.getContentItem<{ link: string }>({ model: 'posts', id }))?.link;
+
+    it('resolves pages:// links in responses when preloadRoutes is true', async () => {
+      mockFetch = routeAwareFetch(() => '/about');
       globalThis.fetch = mockFetch as unknown as typeof fetch;
 
       const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, preloadRoutes: true });
+
+      assert.strictEqual(await linkOf(client, '1'), '/about');
+    });
+
+    it('does not fetch the route map at creation', async () => {
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, preloadRoutes: true });
       assert.ok(client);
 
-      // Should have made a fetch call for route replacements during init
-      assert.ok(mockFetch.mock.calls.length >= 1);
-      const [url] = mockFetch.mock.calls[0].arguments;
-      assert.ok(url.toString().includes('/pages/pages'));
+      assert.strictEqual(mockFetch.mock.calls.length, 0);
+    });
+
+    it('serves a stale route map without waiting and picks up the refresh', async () => {
+      let route = '/about';
+      mockFetch = routeAwareFetch(() => route);
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      // freshMs 0: every read of the cached route map is stale
+      const client = await CockpitAPI({
+        endpoint: TEST_ENDPOINT,
+        preloadRoutes: true,
+        cache: { swr: { freshMs: 0, staleMs: 60_000 } },
+      });
+
+      assert.strictEqual(await linkOf(client, '1'), '/about');
+
+      route = '/about-us';
+      // Stale map served as-is while it refreshes in the background
+      assert.strictEqual(await linkOf(client, '2'), '/about');
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.strictEqual(await linkOf(client, '3'), '/about-us');
+    });
+
+    it('fetches the route map once at creation when caching is disabled', async () => {
+      mockFetch = routeAwareFetch(() => '/about');
+      globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+      const client = await CockpitAPI({ endpoint: TEST_ENDPOINT, preloadRoutes: true, cache: false });
+      assert.strictEqual(mockFetch.mock.calls.length, 1);
+
+      assert.strictEqual(await linkOf(client, '1'), '/about');
+      assert.strictEqual(await linkOf(client, '2'), '/about');
+      assert.strictEqual(mockFetch.mock.calls.length, 3); // route map once + two items
     });
 
     it('skips route preloading when preloadRoutes is false (default)', async () => {

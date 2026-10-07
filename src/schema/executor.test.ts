@@ -17,8 +17,11 @@ describe("createRemoteExecutor", () => {
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
-    mockFetch = mock.fn(async () =>
-      createMockResponse({ body: { data: { test: "value" } } })
+    // Pooled clients resolve pages:// links from the route map (/pages/pages)
+    mockFetch = mock.fn(async (url: string | URL) =>
+      url.toString().includes("/pages/pages")
+        ? createMockResponse({ body: [] })
+        : createMockResponse({ body: { data: { test: "value" } } })
     );
     globalThis.fetch = mockFetch as unknown as typeof fetch;
     envManager.set({ COCKPIT_GRAPHQL_ENDPOINT: TEST_ENDPOINT });
