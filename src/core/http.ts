@@ -1,226 +1,114 @@
 /**
- * HTTP client for Cockpit API requests
+ * HTTP client: authentication, timeouts, errors and response transformation
  */
 
 import { logger } from "../cockpit-logger.ts";
-import type { CockpitConfig } from "./config.ts";
-import type { ResponseTransformer } from "../transformers/image-path.ts";
+import { accessCacheScope, type CockpitConfig } from "./config.ts";
+import { CockpitHttpError, requestError } from "./errors.ts";
 
-/**
- * Per-request options that can override client-level settings
- */
-export interface HttpFetchOptions extends RequestInit {
-  /** Override the client-level useAdminAccess setting for this request */
+export { CockpitHttpError };
+
+export interface RequestOptions {
+  /** JSON body */
+  body?: unknown;
+  /** Multipart body (fetch sets the Content-Type with its boundary) */
+  form?: FormData;
+  /** Return the response text instead of parsed (and transformed) JSON */
+  text?: boolean;
+  /** Per-request override of the client's `useAdminAccess` */
   useAdminAccess?: boolean;
 }
 
+type AccessOptions = Pick<RequestOptions, "useAdminAccess">;
+
 export interface HttpClient {
-  /**
-   * Make a GET request expecting JSON response
-   */
-  fetch<T>(url: URL | string, options?: HttpFetchOptions): Promise<T | null>;
-
-  /**
-   * Make a GET request expecting text response (e.g., URL strings)
-   */
-  fetchText(
-    url: URL | string,
-    options?: HttpFetchOptions,
-  ): Promise<string | null>;
-
-  /**
-   * Make a POST request with JSON body
-   */
-  post<T>(
-    url: URL | string,
-    body: unknown,
-    options?: HttpFetchOptions,
+  /** Resolves to `null` for a 404, throws {@link CockpitHttpError} for other errors */
+  request<T>(
+    method: string,
+    url: URL,
+    options?: RequestOptions,
   ): Promise<T | null>;
-
-  /**
-   * Make a POST request with FormData body (multipart/form-data)
-   */
-  postFormData<T>(
-    url: URL | string,
-    formData: FormData,
-    options?: HttpFetchOptions,
-  ): Promise<T | null>;
-
-  /**
-   * Make a DELETE request
-   */
-  delete<T>(url: URL | string, options?: HttpFetchOptions): Promise<T | null>;
+  fetch<T>(url: URL, options?: AccessOptions): Promise<T | null>;
+  post<T>(url: URL, body: unknown, options?: AccessOptions): Promise<T | null>;
+  delete<T>(url: URL, options?: AccessOptions): Promise<T | null>;
+  /** Cache scope of the effective access mode, for cache keys */
+  accessScope(useAdminAccess?: boolean): string;
 }
 
-/**
- * Normalizes headers to Record<string, string>
- */
-function normalizeHeaders(
-  headers: RequestInit["headers"],
-): Record<string, string> {
-  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
-    return {};
-  }
-  return headers as Record<string, string>;
-}
-
-/**
- * Prepares request options for POST/DELETE requests
- */
-function prepareJsonRequestOptions(
-  options: HttpFetchOptions,
-  method: string,
-  body?: unknown,
-): HttpFetchOptions {
-  const { useAdminAccess, headers, ...restOptions } = options;
-  const customHeaders = normalizeHeaders(headers);
-
-  const fetchOpts: HttpFetchOptions = {
-    ...restOptions,
-    method,
-    headers: { "Content-Type": "application/json", ...customHeaders },
-  };
-
-  if (body !== undefined) fetchOpts.body = JSON.stringify(body);
-  if (useAdminAccess !== undefined) fetchOpts.useAdminAccess = useAdminAccess;
-
-  return fetchOpts;
-}
-
-/**
- * A response transformer, or a factory resolved for every JSON response so
- * the transformation can depend on state that changes over the client's
- * lifetime (e.g. the cached page-link route map).
- */
-export type TransformerSource =
-  | ResponseTransformer
-  | (() => Promise<ResponseTransformer>);
-
-/**
- * Creates an HTTP client with authentication and response transformation
- */
+/** `transform` may modify the freshly parsed JSON in place */
 export function createHttpClient(
   config: CockpitConfig,
-  transformer: TransformerSource,
+  transform: (json: unknown) => unknown = (json) => json,
 ): HttpClient {
-  /**
-   * Build headers with optional admin access override
-   * @param custom - Custom headers to include
-   * @param useAdminAccess - Per-request override (undefined = use config default)
-   */
-  const buildHeaders = (
-    custom: Record<string, string> = {},
-    useAdminAccess?: boolean,
-  ): Record<string, string> => {
-    const headers: Record<string, string> = { ...custom };
-    // Use per-request setting if provided, otherwise fall back to config
-    const shouldUseAdmin = useAdminAccess ?? config.useAdminAccess;
-    if (shouldUseAdmin && config.apiKey !== undefined) {
+  const request = async <T>(
+    method: string,
+    url: URL,
+    { body, form, text = false, useAdminAccess }: RequestOptions = {},
+  ): Promise<T | null> => {
+    const headers: Record<string, string> = {};
+    if (useAdminAccess ?? config.useAdminAccess) {
+      // Never silently downgrade to a public request (different data)
+      if (!config.apiKey) {
+        throw new Error(
+          "Cockpit: useAdminAccess requires an apiKey (pass `apiKey` or set COCKPIT_SECRET / COCKPIT_SECRET_<TENANT>)",
+        );
+      }
       headers["api-Key"] = config.apiKey;
     }
-    return headers;
-  };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  const handleErrorResponse = async (response: Response): Promise<null> => {
-    const errorText = await response.text();
-    logger.error(`Cockpit: Error accessing ${response.url}`, {
-      status: response.status,
-      body: errorText,
-    });
-    throw new Error(
-      `Cockpit: Error accessing ${response.url} (${String(response.status)}): ${errorText}`,
-    );
-  };
+    const init: RequestInit = {
+      method,
+      headers,
+      // fetch would follow a redirect to any origin with the api-Key header
+      ...("api-Key" in headers && { redirect: "error" as const }),
+      ...(form !== undefined && { body: form }),
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+      // One signal for request and body read, so a stalled body times out too
+      ...(config.timeout > 0 && {
+        signal: AbortSignal.timeout(config.timeout),
+      }),
+    };
 
-  const handleJsonResponse = async <T>(
-    response: Response,
-  ): Promise<T | null> => {
-    if (response.status === 404) return null;
-    if (!response.ok) return handleErrorResponse(response);
-
-    const json: unknown = await response.json();
-    const resolved =
-      typeof transformer === "function" ? await transformer() : transformer;
-    return resolved.transform(json) as T;
-  };
-
-  const handleTextResponse = async (
-    response: Response,
-  ): Promise<string | null> => {
-    if (response.status === 404) return null;
-    if (!response.ok) return handleErrorResponse(response);
-
-    return response.text();
-  };
-
-  const doFetch = async (
-    url: URL | string,
-    options: HttpFetchOptions = {},
-  ): Promise<Response> => {
-    const { useAdminAccess, ...fetchOptions } = options;
-    logger.debug(`Cockpit: Requesting ${String(url)}`);
-    return fetch(url, {
-      ...fetchOptions,
-      headers: buildHeaders(
-        fetchOptions.headers as Record<string, string>,
-        useAdminAccess,
-      ),
-    });
-  };
-
-  const fetchData = async <T>(
-    url: URL | string,
-    options: HttpFetchOptions = {},
-  ): Promise<T | null> => {
-    const response = await doFetch(url, options);
-    return handleJsonResponse<T>(response);
-  };
-
-  const fetchTextData = async (
-    url: URL | string,
-    options: HttpFetchOptions = {},
-  ): Promise<string | null> => {
-    const response = await doFetch(url, options);
-    return handleTextResponse(response);
+    try {
+      logger.debug(`Cockpit: ${method} ${url.href}`);
+      const response = await fetch(url, init);
+      if (response.status === 404) return null;
+      if (!response.ok) {
+        const error = new CockpitHttpError(
+          response.status,
+          url,
+          await response.text().catch(() => ""),
+        );
+        logger.error(`Cockpit: Error accessing ${url.href}`, error.cause);
+        throw error;
+      }
+      if (text) return (await response.text()) as T;
+      const json: unknown = await response.json();
+      try {
+        return transform(json) as T;
+      } catch (error) {
+        logger.warn("Cockpit: Failed to transform response", error);
+        return json as T;
+      }
+    } catch (err) {
+      throw requestError(
+        err,
+        url.pathname,
+        config.timeout,
+        "api-Key" in headers,
+      );
+    }
   };
 
   return {
-    fetch: fetchData,
-    fetchText: fetchTextData,
-
-    async post<T>(
-      url: URL | string,
-      body: unknown,
-      options: HttpFetchOptions = {},
-    ): Promise<T | null> {
-      return fetchData<T>(
-        url,
-        prepareJsonRequestOptions(options, "POST", body),
-      );
-    },
-
-    async postFormData<T>(
-      url: URL | string,
-      formData: FormData,
-      options: HttpFetchOptions = {},
-    ): Promise<T | null> {
-      const { useAdminAccess, headers, ...restOptions } = options;
-      const customHeaders = normalizeHeaders(headers);
-      // Do NOT set Content-Type - let browser set it with correct boundary
-      return fetchData<T>(url, {
-        ...restOptions,
-        method: "POST",
-        body: formData,
-        headers: customHeaders,
-        ...(useAdminAccess !== undefined && { useAdminAccess }),
-      });
-    },
-
-    async delete<T>(
-      url: URL | string,
-      options: HttpFetchOptions = {},
-    ): Promise<T | null> {
-      return fetchData<T>(url, prepareJsonRequestOptions(options, "DELETE"));
-    },
+    request,
+    fetch: <T>(url: URL, options?: AccessOptions) =>
+      request<T>("GET", url, options),
+    post: <T>(url: URL, body: unknown, options?: AccessOptions) =>
+      request<T>("POST", url, { ...options, body }),
+    delete: <T>(url: URL, options?: AccessOptions) =>
+      request<T>("DELETE", url, options),
+    accessScope: (useAdminAccess) => accessCacheScope(config, useAdminAccess),
   };
 }

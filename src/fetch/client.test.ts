@@ -1,16 +1,27 @@
 import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert";
-import { createMockResponse, EnvManager, TEST_ENDPOINT } from "../__tests__/test-helpers.ts";
-import { createFetchClient } from "./client.ts";
+import { readFileSync } from "node:fs";
+import { createMockResponse, EnvManager, TEST_ENDPOINT, fetchCall, fetchUrl, fetchUrls, withRedirectServer } from "../__tests__/test-helpers.ts";
+import { createFetchClient, type FetchClient, type FetchClientOptions } from "./client.ts";
+import { CockpitHttpError } from "../index.ts";
 
 describe("createFetchClient", () => {
   let originalFetch: typeof globalThis.fetch;
   let mockFetch: ReturnType<typeof mock.fn>;
+  let body: unknown;
   const envManager = new EnvManager();
+
+  const respond = (impl: () => Promise<Response>) => {
+    mockFetch.mock.mockImplementation(impl);
+  };
+  const client = (options: FetchClientOptions = {}) => createFetchClient({ endpoint: TEST_ENDPOINT, ...options });
+  const url = (i = 0) => new URL(fetchUrl(mockFetch, i));
+  const init = (i = 0) => fetchCall(mockFetch, i)[1];
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
-    mockFetch = mock.fn(async () => createMockResponse({ body: { data: "test" } }));
+    body = { data: "test" };
+    mockFetch = mock.fn(async () => createMockResponse({ body }));
     globalThis.fetch = mockFetch as unknown as typeof fetch;
   });
 
@@ -20,383 +31,204 @@ describe("createFetchClient", () => {
     mock.reset();
   });
 
-  it("throws when no endpoint provided", () => {
-    envManager.clear("COCKPIT_GRAPHQL_ENDPOINT");
-    envManager.clear("NEXT_PUBLIC_COCKPIT_ENDPOINT");
-    assert.throws(() => createFetchClient(), /endpoint is required/);
-  });
-
-  it("uses provided endpoint", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pages();
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("test.cockpit.com"));
-  });
-
-  it("uses COCKPIT_GRAPHQL_ENDPOINT env var as fallback", async () => {
-    envManager.set({ COCKPIT_GRAPHQL_ENDPOINT: "https://env.cockpit.com/graphql" });
-    const client = createFetchClient();
-    await client.pages();
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("env.cockpit.com"));
-  });
-
-  it("uses NEXT_PUBLIC_COCKPIT_ENDPOINT as secondary fallback", async () => {
-    envManager.clear("COCKPIT_GRAPHQL_ENDPOINT");
-    envManager.set({ NEXT_PUBLIC_COCKPIT_ENDPOINT: "https://next.cockpit.com/api" });
-    const client = createFetchClient();
-    await client.pages();
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("next.cockpit.com"));
-  });
-
-  it("includes tenant in URL path", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT, tenant: "mytenant" });
-    await client.pages();
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes(":mytenant/api"));
-  });
-
-  it("uses no-store cache by default", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pages();
-
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    assert.strictEqual(options.cache, "no-store");
-  });
-
-  it("allows custom cache mode", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT, cache: "force-cache" });
-    await client.pages();
-
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    assert.strictEqual(options.cache, "force-cache");
-  });
-
-  it("includes api-Key header when apiKey provided", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT, apiKey: "mysecret" });
-    await client.pages();
-
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    assert.strictEqual(options.headers["api-Key"], "mysecret");
-  });
-
-  it("includes custom headers", async () => {
-    const client = createFetchClient({
-      endpoint: TEST_ENDPOINT,
-      headers: { "X-Custom": "value" },
+  describe("endpoint", () => {
+    it("throws without endpoint option or env var", () => {
+      envManager.clear("COCKPIT_GRAPHQL_ENDPOINT");
+      assert.throws(() => createFetchClient(), /endpoint is required/);
     });
-    await client.pages();
 
-    const [, options] = mockFetch.mock.calls[0].arguments;
-    assert.strictEqual(options.headers["X-Custom"], "value");
-  });
-});
+    it("falls back to COCKPIT_GRAPHQL_ENDPOINT; the option wins", async () => {
+      envManager.set({ COCKPIT_GRAPHQL_ENDPOINT: "https://env.cockpit.com/api/graphql" });
+      await createFetchClient().pages();
+      await client().pages();
+      assert.deepStrictEqual(fetchUrls(mockFetch).map((u) => new URL(u).origin), [
+        "https://env.cockpit.com",
+        "https://test.cockpit.com",
+      ]);
+    });
 
-describe("pageByRoute", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let mockFetch: ReturnType<typeof mock.fn>;
+    it("works on runtimes without a process global", async () => {
+      const descriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
+      assert.ok(descriptor);
+      Object.defineProperty(globalThis, "process", { value: undefined, configurable: true, writable: true });
+      let pending: Promise<unknown>;
+      try {
+        assert.throws(() => createFetchClient(), /endpoint is required/);
+        pending = client().pages();
+      } finally {
+        Object.defineProperty(globalThis, "process", descriptor);
+      }
+      await pending;
+      assert.strictEqual(mockFetch.mock.callCount(), 1);
+    });
 
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    mockFetch = mock.fn(async () => createMockResponse({ body: { title: "Test Page" } }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    mock.reset();
-  });
-
-  it("constructs correct URL", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pageByRoute("/about");
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("/pages/page"));
-    assert.ok(url.includes("route=%2Fabout"));
-  });
-
-  it("passes locale parameter", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pageByRoute("/about", { locale: "en" });
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("locale=en"));
+    it("stays edge-safe (runtime imports: core/url.ts and the import-free core/errors.ts)", () => {
+      const source = readFileSync(new URL("./client.ts", import.meta.url), "utf8");
+      const runtimeImports = [...source.matchAll(/^import (?!type )[^;]*?from "([^"]+)"/gms)].map((m) => m[1]);
+      assert.deepStrictEqual(runtimeImports, ["../core/url.ts", "../core/errors.ts"]);
+      const errors = readFileSync(new URL("../core/errors.ts", import.meta.url), "utf8");
+      assert.deepStrictEqual([...errors.matchAll(/^import /gm)], []);
+    });
   });
 
-  it("normalizes de locale to default", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pageByRoute("/about", { locale: "de" });
+  describe("URLs", () => {
+    const cases: [string, (c: FetchClient) => Promise<unknown>, string, Record<string, string>][] = [
+      ["pageByRoute", (c) => c.pageByRoute("/about", { locale: "en", populate: 2 }), "/api/pages/page", { route: "/about", locale: "en", populate: "2" }],
+      ["pages", (c) => c.pages({ limit: 10, skip: 0 }), "/api/pages/pages", { limit: "10", skip: "0", locale: "default" }],
+      ["pageById", (c) => c.pageById("65a94b56f3c1b3ff040f00e5", { locale: "en", populate: 2 }), "/api/pages/page/65a94b56f3c1b3ff040f00e5", { locale: "en", populate: "2" }],
+      ["getContentItems", (c) => c.getContentItems("news", { limit: 10, filter: { a: 1 } }), "/api/content/items/news", { limit: "10", filter: '{"a":1}', locale: "default" }],
+      ["getContentItem", (c) => c.getContentItem("news", "abc123"), "/api/content/item/news/abc123", { locale: "default" }],
+      ["getContentItem (singleton)", (c) => c.getContentItem("settings"), "/api/content/item/settings", { locale: "default" }],
+      ["fetchRaw", (c) => c.fetchRaw("/pages/menus", { inactive: true, nested: false, skip: 0, undef: undefined }), "/api/pages/menus", { inactive: "1", skip: "0", locale: "default" }],
+    ];
+    for (const [name, call, pathname, params] of cases) {
+      it(`${name} → ${pathname}`, async () => {
+        await call(client());
+        assert.strictEqual(url().pathname, pathname);
+        assert.deepStrictEqual(Object.fromEntries(url().searchParams), params);
+      });
+    }
 
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("locale=default"));
+    it("prefixes the tenant and keeps ids as single path segments", async () => {
+      await client({ tenant: "my-tenant_1" }).getContentItem("news_items", "65a94b56f3c1b3ff040f00e5");
+      assert.strictEqual(url().pathname, "/:my-tenant_1/api/content/item/news_items/65a94b56f3c1b3ff040f00e5");
+    });
+
+    it("maps defaultLanguage to the default locale (no mapping by default)", async () => {
+      await client({ defaultLanguage: "en" }).pageByRoute("/a", { locale: "en" });
+      await client({ defaultLanguage: "en" }).pageByRoute("/a", { locale: "de" });
+      await client().pageByRoute("/a", { locale: "de" });
+      await client({ defaultLanguage: null }).pageByRoute("/a");
+      const locales = fetchUrls(mockFetch).map((u) => new URL(u).searchParams.get("locale"));
+      assert.deepStrictEqual(locales, ["default", "de", "de", "default"]);
+    });
+
+    it("library params (route, locale, populate) win over caller params", async () => {
+      await client().pageByRoute("/about", { route: "/admin", locale: "en" });
+      await client().pageByRoute("/about?locale=fr&populate=99#x");
+      assert.deepStrictEqual(url(0).searchParams.getAll("route"), ["/about"]);
+      assert.deepStrictEqual(url(0).searchParams.getAll("locale"), ["en"]);
+      assert.strictEqual(url(1).searchParams.get("route"), "/about?locale=fr&populate=99#x");
+      assert.deepStrictEqual(url(1).searchParams.getAll("locale"), ["default"]);
+      assert.strictEqual(url(1).searchParams.has("populate"), false);
+      assert.strictEqual(url(1).hash, "");
+    });
   });
 
-  it("passes populate parameter", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pageByRoute("/about", { populate: 2 });
+  describe("responses", () => {
+    it("normalizes list responses to { data, meta? }", async () => {
+      body = [{ _id: "1" }];
+      assert.deepStrictEqual(await client().pages(), { data: [{ _id: "1" }] });
+      assert.deepStrictEqual(await client().getContentItems("news"), { data: [{ _id: "1" }] });
+      body = { data: [{ _id: "1" }], meta: { total: 5 } };
+      assert.deepStrictEqual(await client().getContentItems("news", { skip: 0 }), body);
+      assert.deepStrictEqual(await client().pages({ skip: 0 }), body);
+    });
 
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("populate=2"));
-  });
-});
-
-describe("pages", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let mockFetch: ReturnType<typeof mock.fn>;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    mock.reset();
-  });
-
-  it("constructs correct URL", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pages();
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("/pages/pages"));
+    it("returns null for 404 and throws on other errors", async () => {
+      respond(async () => createMockResponse({ ok: false, status: 404 }));
+      assert.strictEqual(await client().pages(), null);
+      assert.strictEqual(await client().fetchRaw("/custom/path"), null);
+      respond(async () => createMockResponse({ ok: false, status: 500, textBody: "boom" }));
+      const err = await client().fetchRaw("/custom/path").catch((e: unknown) => e);
+      assert.ok(err instanceof CockpitHttpError, "same error class as the main client");
+      assert.strictEqual(err.status, 500);
+      assert.strictEqual(err.message, "Cockpit: Error accessing /api/custom/path (500)");
+      assert.deepStrictEqual(err.cause, { status: 500, url: "https://test.cockpit.com/api/custom/path", body: "boom" });
+    });
   });
 
-  it("uses default locale when not specified", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pages();
+  describe("request init", () => {
+    it("uses cache no-store by default, without headers or redirect override", async () => {
+      await client().pages();
+      await client({ cache: "force-cache" }).pages();
+      assert.strictEqual(init(0).cache, "no-store");
+      assert.strictEqual(init(0).headers, undefined);
+      assert.strictEqual(init(0).redirect, undefined);
+      assert.strictEqual(init(1).cache, "force-cache");
+    });
 
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("locale=default"));
+    for (const [name, options, header] of [
+      ["apiKey", { apiKey: "mysecret" }, ["api-Key", "mysecret"]],
+      ["custom headers", { headers: { "X-Custom": "value" } }, ["X-Custom", "value"]],
+    ] as const) {
+      it(`sends ${name} and never follows redirects with them`, async () => {
+        await client(options).pages();
+        assert.strictEqual(init().headers[header[0]], header[1]);
+        assert.strictEqual(init().redirect, "error");
+      });
+    }
+
+    it("aborts after the timeout (default 15 s, 0 disables)", async () => {
+      await client().pages();
+      await client({ timeout: 0 }).pages();
+      assert.ok(init(0).signal instanceof AbortSignal);
+      assert.strictEqual(init(1).signal, undefined);
+
+      respond((_url?: unknown, req?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          req?.signal?.addEventListener("abort", () => reject(req.signal?.reason));
+        }),
+      );
+      await assert.rejects(() => client({ timeout: 20 }).pages(), /Cockpit: request timed out after 20ms/);
+    });
+
+    for (const reason of ["timeout", "abort"] as const) {
+      it(`maps a ${reason} while reading the body to a timeout error`, async () => {
+        respond((_url?: unknown, req?: RequestInit) =>
+          Promise.resolve({
+            ...createMockResponse(),
+            json: () =>
+              reason === "abort"
+                ? Promise.reject(new DOMException("aborted", "AbortError"))
+                : new Promise((_resolve, reject) => req?.signal?.addEventListener("abort", () => reject(req.signal?.reason))),
+          } as Response),
+        );
+        await assert.rejects(() => client({ timeout: 20 }).pages(), {
+          message: "Cockpit: request timed out after 20ms (/api/pages/pages)",
+        });
+      });
+    }
+
+    it("explains a refused redirect with credentials (real fetch against a local 302)", async () => {
+      globalThis.fetch = originalFetch;
+      await withRedirectServer(async (endpoint) => {
+        const err = await createFetchClient({ endpoint, apiKey: "k" })
+          .pages()
+          .then(() => assert.fail("expected rejection"), (e: unknown) => e as Error);
+        assert.strictEqual(err.message, "Cockpit: refusing to follow redirect for authenticated request (/api/pages/pages)");
+        assert.ok(err.cause instanceof TypeError);
+      });
+    });
   });
 
-  it("normalizes array response to { data } format", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({ body: [{ _id: '1' }, { _id: '2' }] }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
+  describe("validation (nothing is fetched)", () => {
+    afterEach(() => {
+      assert.strictEqual(mockFetch.mock.callCount(), 0);
+    });
 
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    const result = await client.pages();
+    const badSegments = ["abc?re=1&locale=fr#", "posts/../../../:other/api/content/items/secret", "..", ".", "a/b", "a\\b", "a%2fb", "a#b", "a\nb", ""];
+    for (const bad of badSegments) {
+      it(`rejects id/model ${JSON.stringify(bad)}`, async () => {
+        const c = client();
+        await assert.rejects(() => c.pageById(bad), /Cockpit: Invalid id/);
+        await assert.rejects(() => c.getContentItems(bad), /Cockpit: Invalid model/);
+        await assert.rejects(() => c.getContentItem(bad), /Cockpit: Invalid model/);
+        await assert.rejects(() => c.getContentItem("news", bad), /Cockpit: Invalid id/);
+      });
+    }
 
-    assert.ok(result !== null);
-    assert.ok('data' in result);
-    assert.ok(Array.isArray(result.data));
-    assert.strictEqual(result.data.length, 2);
-  });
+    it("rejects invalid tenants at creation", () => {
+      for (const tenant of ["../x", "a/b", "a?b", "a#b", "a%2e", "a.b"]) {
+        assert.throws(() => client({ tenant }), /Cockpit: Invalid tenant format/);
+      }
+    });
 
-  it("returns wrapped response as-is when API returns { data, meta }", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({
-      body: { data: [{ _id: '1' }], meta: { total: 5 } }
-    }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    const result = await client.pages({ skip: 0 });
-
-    assert.ok(result !== null);
-    assert.ok('data' in result);
-    assert.ok('meta' in result);
-    assert.strictEqual(result.meta?.total, 5);
-  });
-
-  it("returns null for 404 response", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({ status: 404, ok: false }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    const result = await client.pages();
-
-    assert.strictEqual(result, null);
-  });
-});
-
-describe("pageById", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let mockFetch: ReturnType<typeof mock.fn>;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    mockFetch = mock.fn(async () => createMockResponse({ body: { _id: "123" } }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    mock.reset();
-  });
-
-  it("constructs correct URL with id", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pageById("65a94b56f3c1b3ff040f00e5");
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("/pages/page/65a94b56f3c1b3ff040f00e5"));
-  });
-
-  it("passes locale and populate options", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.pageById("page123", { locale: "en", populate: 2 });
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("locale=en"));
-    assert.ok(url.includes("populate=2"));
-  });
-});
-
-describe("getContentItems", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let mockFetch: ReturnType<typeof mock.fn>;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    mockFetch = mock.fn(async () => createMockResponse({ body: [] }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    mock.reset();
-  });
-
-  it("constructs correct URL with model", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.getContentItems("news");
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("/content/items/news"));
-  });
-
-  it("passes additional query params", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.getContentItems("news", { limit: 10, skip: 5 });
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("limit=10"));
-    assert.ok(url.includes("skip=5"));
-  });
-
-  it("normalizes array response to { data } format", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({ body: [{ id: 1 }, { id: 2 }] }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    const result = await client.getContentItems("news");
-
-    assert.ok(result !== null);
-    assert.ok('data' in result);
-    assert.ok(Array.isArray(result.data));
-    assert.strictEqual(result.data.length, 2);
-  });
-
-  it("returns wrapped response as-is when API returns { data, meta }", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({
-      body: { data: [{ id: 1 }], meta: { total: 10 } }
-    }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    const result = await client.getContentItems("news", { skip: 0 });
-
-    assert.ok(result !== null);
-    assert.ok('data' in result);
-    assert.ok('meta' in result);
-    assert.strictEqual(result.meta?.total, 10);
-  });
-
-  it("returns null for 404 response", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({ status: 404, ok: false }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    const result = await client.getContentItems("nonexistent");
-
-    assert.strictEqual(result, null);
-  });
-});
-
-describe("getContentItem", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let mockFetch: ReturnType<typeof mock.fn>;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    mockFetch = mock.fn(async () => createMockResponse({ body: { _id: "123" } }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    mock.reset();
-  });
-
-  it("constructs correct URL with model and id", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.getContentItem("news", "abc123");
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("/content/item/news/abc123"));
-  });
-
-  it("constructs URL without id for singleton", async () => {
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.getContentItem("settings");
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("/content/item/settings"));
-    assert.ok(!url.includes("/content/item/settings/"));
-  });
-});
-
-describe("fetchRaw", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let mockFetch: ReturnType<typeof mock.fn>;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    mock.reset();
-  });
-
-  it("returns null for 404 response", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({ ok: false, status: 404 }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    const result = await client.fetchRaw("/custom/path");
-
-    assert.strictEqual(result, null);
-  });
-
-  it("throws on non-404 error response", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({ ok: false, status: 500 }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-
-    await assert.rejects(
-      () => client.fetchRaw("/custom/path"),
-      /Error fetching.*500/
-    );
-  });
-
-  it("filters undefined params from query string", async () => {
-    mockFetch = mock.fn(async () => createMockResponse({ body: {} }));
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    const client = createFetchClient({ endpoint: TEST_ENDPOINT });
-    await client.fetchRaw("/test", { defined: "value", undef: undefined });
-
-    const [url] = mockFetch.mock.calls[0].arguments;
-    assert.ok(url.includes("defined=value"));
-    assert.ok(!url.includes("undef"));
+    const badPaths = ["//evil.com/x", "http://evil.com/x", "evil.com/x", "/../../:other/api/x", "/a/./b", "/a/..", "/a/%2e%2e/b", "/a/%2E%2e/b", "/a/%2fb", "/a/%5cb", "/a\\b", "/a?x=1", "/a#x", "/a\u0000b", "/a//b", ""];
+    for (const path of badPaths) {
+      it(`rejects fetchRaw path ${JSON.stringify(path)}`, async () => {
+        await assert.rejects(() => client({ apiKey: "secret" }).fetchRaw(path), /Cockpit: Invalid request path/);
+      });
+    }
   });
 });

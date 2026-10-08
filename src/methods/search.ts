@@ -2,8 +2,7 @@
  * Search API methods (Detektivo addon)
  */
 
-import type { MethodContext } from "./content.ts";
-import { requireParam } from "../core/validation.ts";
+import { get, segment, type MethodContext } from "./context.ts";
 
 export interface SearchQueryOptions {
   index: string;
@@ -35,15 +34,18 @@ export interface SearchMethods {
 
 export function createSearchMethods(ctx: MethodContext): SearchMethods {
   return {
-    async search<T = CockpitSearchResult>(
-      options: SearchQueryOptions,
-    ): Promise<T | null> {
-      const { index, q, fields, limit, offset } = options;
-      requireParam(index, "a search index");
-      const url = ctx.url.build(`/detektivo/search/${index}`, {
-        queryParams: { q, fields, limit, offset },
-      });
-      return ctx.http.fetch<T>(url);
+    async search<T = CockpitSearchResult>({
+      index,
+      ...query
+    }: SearchQueryOptions): Promise<T | null> {
+      return get<T>(
+        ctx,
+        `/detektivo/search/${segment(index, "search index")}`,
+        {
+          query,
+          cache: false,
+        },
+      );
     },
   };
 }

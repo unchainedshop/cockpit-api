@@ -2,15 +2,20 @@
  * Pages API methods
  */
 
-import type {
-  MethodContext,
-  ContentListQueryOptions,
-  CockpitListResponse,
-} from "./content.ts";
-import { normalizeListResponse } from "./content.ts";
+import { normalizeLocale } from "../core/url.ts";
 import type { CockpitAsset } from "./assets.ts";
-import { requireParam } from "../core/validation.ts";
-import { hashOpts } from "../core/cache.ts";
+import {
+  toList,
+  type CockpitListResponse,
+  type ContentListQueryOptions,
+} from "./content.ts";
+import {
+  get,
+  legacyLocale,
+  segment,
+  withTyped,
+  type MethodContext,
+} from "./context.ts";
 
 export interface PageByIdOptions {
   locale?: string;
@@ -20,6 +25,7 @@ export interface PageByIdOptions {
 export interface PageByRouteOptions {
   locale?: string;
   populate?: number;
+  /** Not found in `locale`: look the route up in the default locale, then load that page in `locale` */
   fallbackToDefault?: boolean;
 }
 
@@ -56,21 +62,25 @@ export interface CockpitPage extends CockpitPageMeta {
   seo?: CockpitPageSeo;
   layout?: CockpitLayoutBlock[];
   _p?: string;
+  /** Parent page id (`null`/absent for root pages) */
+  _pid?: string | null;
+  /** Sort order among siblings */
+  _o?: number;
+  /** Publish state (1 = published) */
+  _state?: number;
+  /**
+   * Locale the page was resolved in (single-page endpoints only). Cockpit
+   * falls back to "default" for a locale that isn't configured.
+   */
+  _locale?: string;
+  /** Route per locale, e.g. `{ default: "/about", en: "/en/about" }` (single-page endpoints only) */
+  _routes?: Record<string, string>;
+  /** Ancestor pages, root first (single-page endpoints only) */
+  _parents?: CockpitPage[];
 }
 
 export interface PagesMethods {
-  /**
-   * Get pages list.
-   *
-   * @returns Always returns `CockpitListResponse<T>` with data and optional meta.
-   * Returns `null` if pages cannot be fetched.
-   *
-   * @example
-   * const response = await cockpit.pages({ limit: 10, skip: 0 });
-   * // response: { data: CockpitPage[], meta?: { total: number } } | null
-   * const pages = response?.data || [];
-   * const total = response?.meta?.total;
-   */
+  /** Pages list (Cockpit sends no `meta.total` for pages) */
   pages<T = CockpitPage>(
     options?: ContentListQueryOptions,
   ): Promise<CockpitListResponse<T> | null>;
@@ -80,90 +90,62 @@ export interface PagesMethods {
   ): Promise<T | null>;
   pageByRoute<T = CockpitPage>(
     route: string,
-    options?: PageByRouteOptions | string,
+    options?: PageByRouteOptions,
   ): Promise<T | null>;
 }
 
 export function createPagesMethods(ctx: MethodContext): PagesMethods {
+  const pageById = async <T>(
+    id: string,
+    { locale, populate }: PageByIdOptions = {},
+  ): Promise<T | null> =>
+    get<T>(ctx, `/pages/page/${segment(id, "page id")}`, {
+      locale,
+      query: { populate },
+    });
+
   return {
     async pages<T = CockpitPage>(
       options: ContentListQueryOptions = {},
     ): Promise<CockpitListResponse<T> | null> {
-      const {
-        locale = "default",
-        limit,
-        skip,
-        sort,
-        filter,
-        fields,
-        queryParams = {},
-      } = options;
-      const url = ctx.url.build("/pages/pages", {
-        locale,
-        queryParams: { ...queryParams, limit, skip, sort, filter, fields },
-      });
-      const key = `pages:list:${locale}:${hashOpts({ limit, skip, sort, filter, fields, queryParams })}`;
-      return ctx.cache.swr<CockpitListResponse<T>>(key, async () =>
-        normalizeListResponse<T>(
-          await ctx.http.fetch<T[] | CockpitListResponse<T>>(url),
-        ),
+      const { locale, useAdminAccess, queryParams, ...query } = options;
+      return get(
+        ctx,
+        "/pages/pages",
+        { locale, useAdminAccess, query: withTyped(queryParams, query) },
+        toList<T>,
       );
     },
 
-    async pageById<T = CockpitPage>(
-      id: string,
-      options: PageByIdOptions = {},
-    ): Promise<T | null> {
-      requireParam(id, "a page id");
-      const { locale = "default", populate } = options;
-      const url = ctx.url.build(`/pages/page/${id}`, {
-        locale,
-        queryParams: { populate },
-      });
-      const key = `pages:id:${locale}:${id}:${String(populate ?? 0)}`;
-      return ctx.cache.swr<T>(key, () => ctx.http.fetch<T>(url));
-    },
+    pageById,
 
     async pageByRoute<T = CockpitPage>(
       route: string,
-      options: PageByRouteOptions | string = "default",
+      options: PageByRouteOptions = {},
     ): Promise<T | null> {
-      const opts = typeof options === "string" ? { locale: options } : options;
-      const { locale = "default", populate, fallbackToDefault = false } = opts;
-
-      // Force populate: 0 to prevent route string issues
-      const queryOptions = { populate: populate ?? 0 };
-
-      const url = ctx.url.build("/pages/page", {
+      const {
         locale,
-        queryParams: { route, ...queryOptions },
-      });
-
-      const key = `pages:route:${locale}:${route}:${String(queryOptions.populate)}`;
-      const result = await ctx.cache.swr<T>(key, () => ctx.http.fetch<T>(url));
-
-      if (result) return result;
-
-      if (fallbackToDefault && locale !== "default") {
-        const defaultUrl = ctx.url.build("/pages/page", {
-          locale: "default",
-          queryParams: { route, ...queryOptions },
-        });
-        const defaultKey = `pages:route:default:${route}:${String(queryOptions.populate)}`;
-        const defaultResult = await ctx.cache.swr<T & { _id?: string }>(
-          defaultKey,
-          () => ctx.http.fetch<T & { _id?: string }>(defaultUrl),
-        );
-
-        if (defaultResult?._id != null && defaultResult._id !== "") {
-          return this.pageById<T>(defaultResult._id, {
-            locale,
-            populate: queryOptions.populate,
-          });
-        }
+        populate = 0,
+        fallbackToDefault = false,
+      } = legacyLocale(options, "pageByRoute(route, locale)");
+      const query = { route, populate };
+      const page = await get<T>(ctx, "/pages/page", { locale, query });
+      // The locale actually sent: the `defaultLanguage` already is "default"
+      if (
+        page !== null ||
+        !fallbackToDefault ||
+        normalizeLocale(locale, ctx.config.defaultLanguage) === "default"
+      ) {
+        return page;
       }
-
-      return null;
+      const fallback = await get<{ _id?: unknown }>(ctx, "/pages/page", {
+        query,
+        links: false,
+      });
+      const id = fallback?._id;
+      return typeof id === "string" && id !== ""
+        ? pageById<T>(id, { ...(locale !== undefined && { locale }), populate })
+        : null;
     },
   };
 }

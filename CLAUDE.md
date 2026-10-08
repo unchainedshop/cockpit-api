@@ -1,583 +1,75 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository. User-facing API, options, caching semantics and the v3 migration guide live in [README.md](README.md); keep it in sync when behavior or the public surface changes.
 
-## Build Commands
+## Commands
 
 ```bash
-npm run build    # Compile TypeScript to dist/
-npm test         # Run tests using Node.js test runner
-npm run test:watch  # Run tests in watch mode
+npm run build             # tsc -> dist/
+npm test                  # unit tests (node:test, --experimental-transform-types, coverage)
+npm run test:watch
+npm run test:integration  # src/__tests__/*.test.ts against a real Cockpit; skipped unless
+                          # COCKPIT_TEST_ENDPOINT is set (optional: COCKPIT_TEST_SECRET,
+                          # COCKPIT_TEST_TENANT, COCKPIT_TEST_SEARCH_INDEX, COCKPIT_TEST_LOKALIZE_PROJECT)
+npm run typecheck         # tsc -p tsconfig.test.json (sources + tests)
+npm run lint              # eslint src (strictTypeChecked + prettier); lint:fix to fix
 ```
 
-## Environment Variables
-
-All options fall back to environment variables when not explicitly provided:
-
-- `COCKPIT_GRAPHQL_ENDPOINT` - Cockpit CMS GraphQL endpoint URL
-- `COCKPIT_SECRET` - Default API key (used when `useAdminAccess: true`)
-- `COCKPIT_SECRET_<TENANT>` - Tenant-specific API keys (e.g., `COCKPIT_SECRET_MYTENANT`)
-- `COCKPIT_CACHE_MAX` - Max cache entries (default: 100)
-- `COCKPIT_CACHE_TTL` - Optional hard cache TTL in milliseconds. Unset by default — the underlying LRU only evicts when `max` is exceeded. SWR manages freshness/staleness via envelope timestamps; setting a TTL shorter than the SWR stale window will evict envelopes before they can serve stale data on upstream failure.
+ESM, TypeScript, Node >= 25. Sources import each other with `.ts` extensions.
 
 ## Architecture
 
-TypeScript library (`@unchainedshop/cockpit-api`) for Cockpit CMS. ESM module targeting Node.js 20.
-
-### Package Exports
-
-The package provides three entry points:
-
-1. **Main** (`@unchainedshop/cockpit-api`) - Full-featured async API client with caching and response transformation
-2. **Schema** (`@unchainedshop/cockpit-api/schema`) - GraphQL schema stitching utilities (requires `@graphql-tools/wrap` peer dependency)
-3. **Fetch** (`@unchainedshop/cockpit-api/fetch`) - Lightweight synchronous client for edge/RSC environments
-
-### Directory Structure
+Three entry points: `.` (full client), `./fetch` (edge/RSC client), `./schema` (GraphQL gateway).
 
 ```
 src/
-├── client.ts              # CockpitAPI factory function (async initialization)
-├── cockpit-logger.ts      # Logger using @unchainedshop/logger
-├── index.ts               # Main package exports
+├── index.ts               # main entry: public exports only
+├── client.ts              # CockpitAPI(): config -> cache -> url -> http(+asset fixer) -> links -> methods
+├── links.ts               # pages:// resolution, per-locale route maps (SWR-cached), findPageLinks
+├── cockpit-logger.ts      # @unchainedshop/logger instance, warnOnce()
 ├── core/
-│   ├── index.ts           # Core module exports
-│   ├── config.ts          # Configuration management
-│   ├── cache.ts           # LRU cache wrapper
-│   ├── http.ts            # HTTP client with auth & transformation
-│   ├── url-builder.ts     # URL construction
-│   └── query-string.ts    # Query parameter encoding
+│   ├── config.ts          # options + env fallbacks, accessCacheScope, cachePrefix
+│   ├── cache.ts           # CacheManager (SWR, copies, inflight dedupe), createLRUCacheStore
+│   ├── http.ts            # fetch wrapper: auth, redirects, timeout, transform (re-exports CockpitHttpError)
+│   ├── errors.ts          # EDGE-SAFE, no imports: CockpitHttpError, requestError() (timeout / refused redirect)
+│   └── url.ts             # EDGE-SAFE: path validation, assertSafePath, query strings, locales
 ├── methods/
-│   ├── index.ts           # Method module exports
-│   ├── content.ts         # Content CRUD operations
-│   ├── pages.ts           # Pages API
-│   ├── menus.ts           # Menu API
-│   ├── routes.ts          # Routes, sitemap, settings
-│   ├── assets.ts          # Asset operations
-│   ├── graphql.ts         # GraphQL method
-│   ├── search.ts          # Search (Detektivo addon)
-│   ├── localize.ts        # Localization (Lokalize addon)
-│   └── system.ts          # Health check, cache clearing
-├── schema/
-│   ├── index.ts           # Schema stitching exports
-│   ├── types.ts           # Schema types
-│   ├── executor.ts        # Remote executor with client pooling
-│   └── schema-builder.ts  # GraphQL schema builder
-├── fetch/
-│   ├── index.ts           # Lightweight client exports
-│   ├── types.ts           # Fetch client types
-│   └── client.ts          # Lightweight fetch client
-├── transformers/
-│   ├── index.ts           # Transformer exports
-│   ├── image-path.ts      # Response path transformation
-│   └── compose.ts         # Transformer composition
+│   ├── context.ts         # MethodContext, segment(), withTyped(), legacyLocale(), cacheKey(), get(), withLinks()
+│   ├── content.ts         # content CRUD, contentCachePrefixes (write invalidation)
+│   ├── pages.ts  menus.ts  routes.ts  assets.ts  graphql.ts  search.ts  localize.ts
+│   └── system.ts          # healthCheck, clearCache, clearRouteCache (ROUTE_CACHE_PREFIXES)
+├── transformers/assets.ts # createAssetFixer: asset object paths + storage src/href
 ├── utils/
-│   ├── index.ts           # Utility exports
-│   ├── tenant.ts          # Tenant ID/URL resolution
-│   └── route-map.ts       # Route replacement generation
-└── __tests__/
-    └── test-helpers.ts    # Test utilities
+│   ├── tenant.ts          # getTenantIds, resolveApiKey, resolveTenantFromUrl
+│   └── url-protocols.ts   # parseCockpitUrl, extractPageId, extractAssetId
+├── fetch/                 # createFetchClient (index.ts, client.ts)
+├── schema/                # executor.ts (pooled clients, tenant allowlist), schema-builder.ts
+└── __tests__/             # integration.test.ts, test-helpers.ts
 ```
 
-### Key Patterns
-
-**Async initialization**: `CockpitAPI(options?)` returns a Promise. With `preloadRoutes`, `pages://id` links are resolved per response from an SWR-cached route map (fetched once at creation only when `cache: false`).
-
-**Configuration with fallbacks**: All options fall back to environment variables (e.g., `COCKPIT_GRAPHQL_ENDPOINT`, `COCKPIT_CACHE_MAX`).
-
-**No shared state**: Each client instance has its own LRU cache. No singletons or module-level mutable state.
-
-**Multi-tenant**: Optional `tenant` option. Requests use `/:${tenant}/api/...` path pattern. Looks for `COCKPIT_SECRET_<TENANT>` env vars.
-
-**Response transformation**: `createImagePathTransformer()` fixes asset paths and resolves `pages://id` links. Legacy `FixImagePaths()` available for backwards compatibility.
-
-**Locale handling**: The configured `defaultLanguage` (defaults to "de") maps to Cockpit's "default" locale internally. Locale passed via options objects.
-
-**Error handling**: HTTP errors throw `Error`. 404 returns `null`. Errors prefixed with "Cockpit:".
-
-**Admin access**: Set `useAdminAccess: true` at factory level for all requests, or per-request to override. Per-request setting takes precedence over factory setting. Requires `apiKey` or `COCKPIT_SECRET` env var.
-
-## API Methods (Main Client)
-
-**Content:**
-- `getContentItem<T>({ model, id?, locale?, queryParams?, useAdminAccess? })`
-- `getContentItems<T>(model, { limit?, skip?, sort?, filter?, fields?, populate?, locale?, useAdminAccess? })`
-  - **Always returns `CockpitListResponse<T> | null`** with consistent format:
-    - `{ data: T[], meta?: { total: number } }`
-  - Access items: `response?.data || []`
-  - Access total: `response?.meta?.total`
-- `getUnchainedContentItems<T>(model, { limit?, skip?, sort?, filter?, fields?, populate?, locale?, includeUnpublished? })` - Unchained module
-  - Same response format as `getContentItems`
-  - Always uses admin access (requires API key with `content/{model}/read` permission)
-  - Set `includeUnpublished: true` to include unpublished items
-- `getContentTree<T>(model, { parent?, filter?, fields?, populate?, locale?, useAdminAccess? })`
-- `getAggregateModel<T>({ model, pipeline, locale? })`
-- `postContentItem<T>(model, item)`
-- `deleteContentItem<T>(model, id)`
-
-**Pages:**
-- `pages<T>({ limit?, skip?, sort?, filter?, fields?, locale? })`
-  - **Always returns `CockpitListResponse<T> | null`** with consistent format:
-    - `{ data: T[], meta?: { total: number } }`
-  - **Note:** The Cockpit CMS `/api/pages/pages` endpoint returns a raw array and does not include `meta.total` even when using pagination (unlike `/api/content/items/{model}`). The library normalizes this to `{ data: [...] }` but `meta` will not be present.
-  - Access pages: `response?.data || []`
-  - Access total: `response?.meta?.total` (will be undefined for pages())
-- `pageById<T>({ page, id, locale?, populate? })`
-- `pageByRoute<T>(route, { locale?, populate? })`
-
-**Menus:**
-- `pagesMenus<T>({ locale?, inactive? })`
-- `pagesMenu<T>(name, { locale?, inactive? })`
-
-**Routes:**
-- `pagesRoutes<T>(locale?)`
-- `pagesSitemap<T>()`
-- `pagesSetting<T>(locale?)`
-
-**Assets:**
-- `assetById<T>(assetId)`
-- `imageAssetById<T>(assetId, { m?, w?, h?, q?, re?, t?, o?, mime? })`
-- `uploadAssets(files, { folder? })` - Unchained module
-  - Upload files to Cockpit CMS
-  - Always uses admin access (requires API key with `assets/upload` permission)
-  - Returns `{ assets: CockpitAsset[] }`
-
-**Other:**
-- `search<T>({ index, q?, limit?, offset? })` - Detektivo addon
-- `localize<T>(projectName, { locale?, nested? })` - Lokalize addon
-- `graphQL<T>(document, variables?)`
-- `healthCheck<T>()`
-- `clearCache(pattern?)`
-- `getFullRouteForSlug(slug)`
-
-## Lightweight Fetch Client (`/fetch`)
-
-For edge/RSC environments where the full client is too heavy:
-
-```typescript
-import { createFetchClient } from "@unchainedshop/cockpit-api/fetch";
-
-const cockpit = createFetchClient({
-  endpoint: process.env.NEXT_PUBLIC_COCKPIT_ENDPOINT,
-  tenant: "mytenant",
-  cache: "force-cache",  // Uses platform caching
-});
-
-// Available methods:
-cockpit.pageByRoute<T>(route, { locale?, populate? })
-cockpit.pages<T>({ locale?, ... })  // Returns CockpitListResponse<T> | null
-cockpit.pageById<T>(page, id, { locale?, populate? })
-cockpit.getContentItems<T>(model, { locale?, limit?, ... })  // Returns CockpitListResponse<T> | null
-cockpit.getContentItem<T>(model, id?, { locale?, ... })
-cockpit.fetchRaw<T>(path, params)  // For custom paths
-```
-
-## Schema Stitching (`/schema`)
-
-For GraphQL schema stitching with `@graphql-tools/wrap`:
-
-```typescript
-import { makeCockpitGraphQLSchema } from "@unchainedshop/cockpit-api/schema";
-import { stitchSchemas } from "@graphql-tools/stitch";
-
-const cockpitSchema = await makeCockpitGraphQLSchema({
-  tenantHeader: "x-cockpit-space",  // Header for multi-tenant support
-  filterMutations: true,             // Read-only by default
-  extractTenant: (ctx) => ctx.req?.headers["x-tenant"],  // Custom tenant extraction
-  cockpitOptions: { endpoint, apiKey },
-});
-
-const gatewaySchema = stitchSchemas({
-  subschemas: [{ schema: cockpitSchema }],
-});
-```
-
-## Exported Types
-
-**Main Package:**
-```typescript
-// Client
-CockpitAPIClient, CockpitAPIOptions, CacheManager, CacheOptions, AsyncCacheStore
-
-// Query Options
-ListQueryOptions, ContentItemQueryOptions, ContentListQueryOptions,
-UnchainedContentListQueryOptions, TreeQueryOptions, AggregateQueryOptions,
-PageQueryOptions, PageByRouteOptions, MenuQueryOptions, LocalizeOptions,
-SearchQueryOptions, ImageAssetQueryParams, UploadAssetsOptions
-
-// Response Types
-CockpitAsset, CockpitPage, CockpitPageMeta, CockpitPageSeo,
-CockpitPageType, CockpitLayoutBlock, CockpitMenu, CockpitMenuUrl,
-CockpitMenuLink, CockpitRoute, CockpitRoutesResponse,
-CockpitSitemapEntry, CockpitSettings, CockpitPreviewConfig,
-CockpitContentItem, CockpitNewsItem, CockpitTreeNode,
-CockpitListResponse, CockpitListMeta, UploadAssetsResponse,
-CockpitSearchResult, CockpitSearchHit, CockpitHealthCheck
-
-// Enums
-ImageSizeMode, MimeType
-
-// Utilities
-getTenantIds, resolveTenantFromUrl, resolveTenantFromSubdomain,
-generateCmsRouteReplacements, generateCollectionAndSingletonSlugRouteMap,
-createImagePathTransformer, composeTransformers,
-identityTransformer, ResponseTransformer, MethodContext,
-TenantUrlResult, ResolveTenantFromUrlOptions, ResolveTenantFromSubdomainOptions
-```
-
-**Schema Package (`/schema`):**
-```typescript
-makeCockpitGraphQLSchema, createRemoteExecutor,
-MakeCockpitSchemaOptions, CockpitExecutorContext, ExecutorRequest, RemoteExecutor
-```
-
-**Fetch Package (`/fetch`):**
-```typescript
-createFetchClient, FetchClient,
-FetchClientOptions, FetchCacheMode, PageFetchParams
-```
-
-## Peer Dependencies
-
-- `graphql` (optional) - Required for `graphQL()` method
-- `@graphql-tools/wrap` (optional) - Required for `/schema` subpackage
-
-## v2.0.0 Breaking Changes
-
-- `lokalize()` renamed to `localize()`
-- Methods use options objects instead of positional parameters
-- HTTP errors throw instead of returning `null` (404 still returns `null`)
-- Each client has its own cache (no shared singleton)
-
-## v2.1.0 New Features
-
-- `/schema` subpackage for GraphQL schema stitching
-- `/fetch` subpackage for lightweight edge/RSC environments
-- `preloadRoutes` option for preloading route replacements during initialization
-- `defaultLanguage` option to configure which language maps to Cockpit's "default" locale (defaults to "de")
-- Expanded tenant utilities: `resolveTenantFromUrl()`, `resolveTenantFromSubdomain()`
-
-## v2.1.3 (Features)
-
-- **Flexible meta type**: `CockpitMenuLink.meta` now accepts both array and object formats
-  - Type: `meta?: { key: string; value: string }[] | Record<string, string>`
-  - Supports both formats that Cockpit CMS may return depending on configuration
-  - No transformation applied - consumers can handle as needed
-  - Helper function example for transforming arrays to objects:
-    ```typescript
-    function transformMeta(meta?: { key: string; value: string }[] | Record<string, string>) {
-      if (!meta) return {};
-      if (Array.isArray(meta)) {
-        return meta.reduce((acc, { key, value }) => {
-          acc[key] = value;
-          return acc;
-        }, {} as Record<string, string>);
-      }
-      return meta;
-    }
-
-    // Usage
-    const metaObj = transformMeta(link.meta);
-    const layout = metaObj.layout;
-    ```
-
-## v2.2.0 (Breaking Changes)
-
-### Async Cache Operations
-
-All cache operations are now async and return Promises. This enables support for external cache stores like Redis and Keyv.
-
-**Before (v2.1.x)**:
-```typescript
-client.clearCache();
-client.clearCache('ROUTE');
-```
-
-**After (v2.2.0)**:
-```typescript
-await client.clearCache();
-await client.clearCache('ROUTE');
-```
-
-**Impact**: Any code calling `clearCache()` must now `await` the result.
-
-### Custom Cache Store Support
-
-v2.2.0 adds pluggable async cache support. You can now provide custom cache implementations:
-
-#### Redis Example
-
-```typescript
-import { createClient } from 'redis';
-import type { AsyncCacheStore } from '@unchainedshop/cockpit-api';
-
-const redisClient = createClient({ url: process.env.REDIS_URL });
-await redisClient.connect();
-
-const redisStore: AsyncCacheStore = {
-  async get(key: string) {
-    const value = await redisClient.get(key);
-    return value ? JSON.parse(value) : undefined;
-  },
-  async set(key: string, value: unknown) {
-    await redisClient.set(key, JSON.stringify(value), { EX: 100 });
-  },
-  async clear(pattern?: string) {
-    if (pattern) {
-      const keys = await redisClient.keys(`${pattern}*`);
-      if (keys.length > 0) await redisClient.del(keys);
-    } else {
-      await redisClient.flushDb();
-    }
-  }
-};
-
-const client = await CockpitAPI({
-  endpoint: 'https://cms.example.com/api/graphql',
-  cache: { store: redisStore }
-});
-```
-
-#### Keyv Example
-
-```typescript
-import Keyv from 'keyv';
-import KeyvRedis from '@keyv/redis';
-import type { AsyncCacheStore } from '@unchainedshop/cockpit-api';
-
-const keyv = new Keyv({
-  store: new KeyvRedis(process.env.REDIS_URL)
-});
-
-const keyvStore: AsyncCacheStore = {
-  async get(key: string) {
-    return await keyv.get(key);
-  },
-  async set(key: string, value: unknown) {
-    await keyv.set(key, value, 100000); // 100000ms TTL
-  },
-  async clear(pattern?: string) {
-    if (!pattern) {
-      await keyv.clear();
-    }
-    // Note: Keyv doesn't have native pattern matching
-    // Pattern matching requires custom implementation
-  }
-};
-
-const client = await CockpitAPI({
-  endpoint: 'https://cms.example.com/api/graphql',
-  cache: { store: keyvStore }
-});
-```
-
-### Disabling Cache
-
-You can now explicitly disable caching:
-
-```typescript
-const client = await CockpitAPI({
-  endpoint: 'https://cms.example.com/api/graphql',
-  cache: false  // Disables all caching
-});
-```
-
-### Migration Guide: v2.1.x → v2.2.0
-
-#### 1. Update clearCache() Calls
-
-All `clearCache()` calls must now be awaited:
-
-```typescript
-// Before (v2.1.x)
-client.clearCache();
-client.clearCache('ROUTE');
-
-// After (v2.2.0)
-await client.clearCache();
-await client.clearCache('ROUTE');
-```
-
-#### 2. Update Tests with Mock Cache
-
-If your tests mock the cache, update them to use async operations:
-
-```typescript
-// Before (v2.1.x)
-const mockCache = {
-  get: (key) => store.get(key),
-  set: (key, value) => store.set(key, value),
-  clear: () => store.clear()
-};
-
-// After (v2.2.0)
-const mockCache = {
-  get: async (key) => store.get(key),
-  set: async (key, value) => store.set(key, value),
-  clear: async () => store.clear()
-};
-```
-
-#### 3. Error Handling
-
-Cache errors now propagate as rejected promises. Wrap cache operations in try-catch if you need custom error handling:
-
-```typescript
-try {
-  await client.clearCache();
-} catch (error) {
-  console.error('Failed to clear cache:', error);
-}
-```
-
-### Important Notes
-
-- **TTL Behavior**: The default LRU cache handles TTL automatically. Custom stores must implement their own TTL logic (e.g., Redis `EX` option).
-
-- **Pattern Matching**: Pattern matching in `clear(pattern)` is implementation-specific. The default LRU store uses `startsWith()` matching. Redis uses glob patterns (`*`, `?`, `[]`). Custom stores should document their pattern matching behavior.
-
-- **Serialization**: The default LRU stores objects directly in memory (no serialization). External stores like Redis must serialize data (typically using JSON.stringify/parse). Custom stores are responsible for their own serialization.
-
-- **Environment Variables**: `COCKPIT_CACHE_MAX` and `COCKPIT_CACHE_TTL` are only used when no custom cache store is provided. They are ignored when using a custom store.
-
-- **No-Op Cache**: When `cache: false`, all cache operations become no-ops but still return Promises for API consistency.
-
-## v3.0.0 (Breaking Changes)
-
-### 1. Consistent List Response Format
-
-All list methods now return a consistent response format regardless of parameters:
-
-**Changed Methods:**
-- `getContentItems<T>()` - Now always returns `CockpitListResponse<T> | null`
-- `pages<T>()` - Now always returns `CockpitListResponse<T> | null`
-- Fetch client methods (`pages()`, `getContentItems()`) - Now always return `CockpitListResponse<T> | null`
-
-**Response Format:**
-```typescript
-interface CockpitListResponse<T> {
-  data: T[];
-  meta?: CockpitListMeta;  // Present when using pagination (skip parameter)
-}
-
-interface CockpitListMeta {
-  total?: number;
-  [key: string]: unknown;
-}
-```
-
-**Before (v2.x)**:
-```typescript
-// Without skip - returns array directly
-const items = await cockpit.getContentItems('posts', { limit: 10 });
-// items: Post[] | null
-
-// With skip - returns wrapped response
-const response = await cockpit.getContentItems('posts', { limit: 10, skip: 0 });
-// response: { data: Post[], meta: { total: number } } | Post[] | null
-
-// Required normalization
-const normalizedItems = Array.isArray(response) ? response : response?.data || [];
-const total = !Array.isArray(response) && response?.meta?.total;
-```
-
-**After (v3.0.0)**:
-```typescript
-// Always returns consistent format
-const response = await cockpit.getContentItems('posts', { limit: 10 });
-// response: { data: Post[], meta?: { total: number } } | null
-
-// No normalization needed
-const items = response?.data || [];
-const total = response?.meta?.total;
-
-// Same applies to pages()
-const pageResponse = await cockpit.pages({ limit: 10, skip: 0 });
-const pages = pageResponse?.data || [];
-const total = pageResponse?.meta?.total;
-```
-
-### Migration Guide: v2.x → v3.0.0
-
-#### 1. Update getContentItems() Calls
-
-```typescript
-// Before (v2.x)
-const items = await cockpit.getContentItems('posts', { limit: 10 });
-// items could be Post[] or null
-
-// After (v3.0.0)
-const response = await cockpit.getContentItems('posts', { limit: 10 });
-const items = response?.data || [];
-```
-
-#### 2. Update pages() Calls
-
-```typescript
-// Before (v2.x)
-const pages = await cockpit.pages({ limit: 10 });
-// pages could be Page[] or null
-
-// After (v3.0.0)
-const response = await cockpit.pages({ limit: 10 });
-const pages = response?.data || [];
-```
-
-#### 3. Update Fetch Client Calls
-
-The lightweight fetch client has the same changes:
-
-```typescript
-// Before (v2.x)
-const pages = await fetchClient.pages();
-// pages: Page[] | null
-
-// After (v3.0.0)
-const response = await fetchClient.pages();
-const pages = response?.data || [];
-```
-
-#### 4. Accessing Metadata
-
-Metadata (like `total`) is now consistently available via the `meta` property:
-
-```typescript
-// v3.0.0 - Always consistent
-const response = await cockpit.getContentItems('posts', { limit: 10, skip: 0 });
-if (response?.meta?.total) {
-  console.log(`Total items: ${response.meta.total}`);
-}
-```
-
-### Benefits
-
-1. **Predictable API**: No need to check if response is an array or object
-2. **Type Safety**: Single return type makes TypeScript usage cleaner
-3. **Easier Testing**: Tests can always expect the same shape
-4. **Better DX**: No manual normalization required
-
-### 2. TreeQueryOptions Type Correction
-
-`TreeQueryOptions` no longer extends `ListQueryOptions`, removing the incorrect `limit` and `skip` parameters.
-
-**Reason:** Tree endpoints work with hierarchical data structures where `limit`/`skip` don't make semantic sense. Trees are controlled by:
-- `parent` - Filter to a specific subtree
-- `populate` - Control depth of tree traversal
-- `filter` - Filter nodes based on criteria
-- `fields` - Select specific fields to return
-
-**Impact:** If you were passing `limit` or `skip` to `getContentTree()`, TypeScript will now correctly flag this as an error. These parameters were always ignored by the implementation.
-
-```typescript
-// Before (v2.x) - TypeScript allowed but parameters were ignored
-await cockpit.getContentTree('categories', {
-  limit: 10,  // ❌ Was silently ignored
-  skip: 5     // ❌ Was silently ignored
-});
-
-// After (v3.0.0) - TypeScript correctly prevents invalid parameters
-await cockpit.getContentTree('categories', {
-  parent: 'root-id',  // ✅ Correct - filter to subtree
-  populate: 2,        // ✅ Correct - control depth
-  filter: { active: true }  // ✅ Correct - filter nodes
-});
-```
+Every main-client read goes through `get()` in `methods/context.ts`: build URL (validated) -> `cacheKey()` -> `cache.swr()` -> `withLinks()`. Asset paths are fixed in `http.ts` before caching; page links are resolved after the cache.
+
+## Invariants (do not break)
+
+- **Paths:** every id/name in a path goes through `segment()` / `validatePathSegment()` (`^[a-zA-Z0-9_-]+$`), and every request URL is built by `createUrlBuilder().build()`, which calls `assertSafePath()` and rejects any parser normalization. Never concatenate URLs elsewhere.
+- **Credentials never follow redirects:** a request with `api-Key` (main client) or with `apiKey`/`headers` (`/fetch`) sets `redirect: "error"`; the resulting fetch failure is mapped by `requestError()` to `Cockpit: refusing to follow redirect for authenticated request (<path>)`.
+- **Timeouts:** one `AbortSignal.timeout` covers request and body read (both inside the `try` that maps errors via `requestError()`, in both clients); default 15 s (`DEFAULT_TIMEOUT_MS`), `0` disables.
+- **`queryParams` vs typed options:** merge with `withTyped()`: typed options win only when defined, so `undefined` never drops a `queryParams` key.
+- **Admin access without a key throws**; never downgrade to a public request. A tenant never falls back to `COCKPIT_SECRET`.
+- **Page links** are resolved after the cache, per call, in the request's normalized locale, from the **published-only** route map, fetched through the client's own `http` (credentials, tenant, timeout) and cached under `ROUTE_MAPS:v4:<locale>`. Bump the version when the map shape changes. Link resolution never throws.
+- **Writes** (`postContentItem`, `deleteContentItem`) invalidate the model's prefixes (`contentCachePrefixes`) and never resolve links; neither do `getUnchainedContentItems` (also never cached) and `uploadAssets`. Invalidation failures are logged, not thrown.
+- **Cache keys** are `<api path>|<access scope>|<sha1 of sorted query>` under `cockpit-api:<endpoint>:<tenant>:<client scope>:`. The query carries the normalized locale. The `|` after the path keeps prefix clears exact. Never put a raw API key in a key (`admin-<sha256 prefix>`).
+- **Copies:** `CacheManager` `structuredClone`s on write and on every read (including joined in-flight fetches); callers own what they get, and link/asset rewriting mutates owned values in place.
+- **Bounded staleness:** fresh -> serve; stale -> serve + one deduped background refresh; cold/expired -> wait, errors propagate. 401/403 and 404 expire existing data (tombstone `data: null`). Nothing is served past `staleUntil`. Only the fetch registered in `inflight` may write back; `clear()` drops pending ones.
+- **`/fetch` is edge-safe:** at runtime it may import only `core/url.ts` and the import-free `core/errors.ts` (type-only imports elsewhere are fine). No `node:*`, no logger, no cache.
+- **Gateway:** tenants are lower-cased, validated and checked against `allowedTenants` before a pooled client is created; `cockpitOptions.apiKey` is only used for the default space.
+- `graphql` and `@graphql-tools/wrap` are optional peers: the main entry loads `graphql` lazily inside `graphQL()`.
+
+## Conventions
+
+- Tests sit next to sources (`*.test.ts`), use `node:test` + `node:assert`, and are table-driven where cases repeat (`for (const [...] of cases) it(...)`).
+- Mock `fetch` with `createMockResponse()` from `src/__tests__/test-helpers.ts`; its `json()` returns a fresh `structuredClone` per call like a real `Response`. Inspect calls with `fetchCall` / `fetchUrl` / `fetchUrls`.
+- Library errors start with `Cockpit:`; HTTP errors are `CockpitHttpError` (short message, body in `cause`); 404 resolves to `null`.
+- No module-level mutable state besides the lazy `graphql` import and `warnOnce()`'s set of warned keys; every client owns its cache manager and in-flight map.
+- Removed v2 usage gets a `warnOnce()` warning: options `preloadRoutes`, `cache.ttl` / `maxSize` / `memoryLayer` (ignored); a string locale argument to `pageByRoute` / `pagesMenus` / `pagesMenu` is honored as `{ locale }` (`legacyLocale()`).
+- Keep comments short and about why. Public types are exported from the entry `index.ts` files only.

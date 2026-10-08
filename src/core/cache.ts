@@ -1,449 +1,202 @@
 /**
- * Cache management with pluggable async stores and tenant isolation
- *
- * v3.0.0 Breaking Change: All cache operations are now async
+ * Async cache with pluggable stores and stale-while-revalidate reads
  */
 
 import { createHash } from "node:crypto";
 import { LRUCache } from "lru-cache";
 import { logger } from "../cockpit-logger.ts";
+import { CockpitHttpError } from "./errors.ts";
 
-export const DEFAULT_SWR_FRESH_MS: number = 60 * 60 * 1000;
-export const DEFAULT_SWR_STALE_MS: number = 30 * 24 * 60 * 60 * 1000;
+// Any non-nullish value (equivalent to `{}`, spelled out for lint)
+type CacheValue = object | string | number | boolean | bigint | symbol;
 
-export const hashOpts = (opts: unknown): string =>
-  createHash("sha1").update(JSON.stringify(opts)).digest("hex");
+export const DEFAULT_CACHE_MAX = 100;
+export const DEFAULT_SWR_FRESH_MS: number = 60 * 60 * 1000; // 1 hour
+export const DEFAULT_SWR_STALE_MS: number = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/** JSON replacer emitting plain objects with sorted keys (arrays keep order) */
+const sortKeys = (_key: string, value: unknown): unknown => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const source = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) sorted[key] = source[key];
+  return sorted;
+};
+
+/** Stable hash of an options object for cache keys (key order irrelevant) */
+export const hashOpts = (opts: object): string =>
+  createHash("sha1").update(JSON.stringify(opts, sortKeys)).digest("hex");
+
+/**
+ * Store behind the cache manager (Redis, Keyv, ...; examples in the README).
+ * May hand out shared references: the manager copies on write and read.
+ */
+export interface AsyncCacheStore {
+  get(key: string): Promise<unknown>;
+  set(key: string, value: CacheValue): Promise<void>;
+  /** Clears every entry, or those whose key starts with `pattern` */
+  clear(pattern?: string): Promise<void>;
+}
+
+export interface CacheOptions {
+  /** Entries of the built-in LRU store (env: COCKPIT_CACHE_MAX, default: 100) */
+  max?: number;
+  /** Stale-while-revalidate windows in ms (defaults: fresh 1 h, stale 30 days) */
+  swr?: { freshMs?: number; staleMs?: number };
+  /** Custom store; `max` is then ignored */
+  store?: AsyncCacheStore;
+}
+
+/** Every value it returns is a private copy, safe to mutate */
+export interface CacheManager {
+  get(key: string): Promise<unknown>;
+  set(key: string, value: CacheValue): Promise<void>;
+  /** Clears entries whose key starts with `pattern` (relative to the prefix) */
+  clear(pattern?: string): Promise<void>;
+  /**
+   * Fresh hit: cached data. Stale hit: cached data, plus one deduped
+   * background refresh. Cold or past the stale window: waits for the fetcher
+   * (concurrent callers share it); its errors propagate. A failed background
+   * refresh keeps the stale entry, except on 401/403 (revoked credentials),
+   * which expire it. `null` (404) is not cached and expires existing data.
+   */
+  swr<T>(key: string, fetcher: () => Promise<T | null>): Promise<T | null>;
+}
 
 interface SwrEnvelope<T> {
-  data: T;
+  /** `null` marks an expired tombstone */
+  data: T | null;
   freshUntil: number;
   staleUntil: number;
 }
 
-export interface SwrOptions {
-  freshMs?: number;
-  staleMs?: number;
-}
+const isEnvelope = <T>(value: unknown): value is SwrEnvelope<T> =>
+  typeof value === "object" && value !== null && "staleUntil" in value;
 
-/**
- * Manager-level SWR defaults. Applied when a `swr()` call omits per-call options.
- * Falls back to {@link DEFAULT_SWR_FRESH_MS} / {@link DEFAULT_SWR_STALE_MS} if unset.
- */
-export type SwrDefaults = SwrOptions;
+const copy = <T>(value: T): T => structuredClone(value);
 
-/**
- * Async cache store interface that custom cache implementations must implement
- *
- * @example Redis implementation
- * ```typescript
- * import { createClient } from 'redis';
- * import type { AsyncCacheStore } from '@unchainedshop/cockpit-api';
- *
- * const redisClient = createClient({ url: 'redis://localhost:6379' });
- * await redisClient.connect();
- *
- * const redisStore: AsyncCacheStore = {
- *   async get(key: string) {
- *     const value = await redisClient.get(key);
- *     return value ? JSON.parse(value) : undefined;
- *   },
- *   async set(key: string, value: unknown) {
- *     await redisClient.set(key, JSON.stringify(value), { EX: 100 });
- *   },
- *   async clear(pattern?: string) {
- *     if (pattern) {
- *       const keys = await redisClient.keys(`${pattern}*`);
- *       if (keys.length > 0) await redisClient.del(keys);
- *     } else {
- *       await redisClient.flushDb();
- *     }
- *   }
- * };
- * ```
- *
- * @example Keyv implementation
- * ```typescript
- * import Keyv from 'keyv';
- * import type { AsyncCacheStore } from '@unchainedshop/cockpit-api';
- *
- * const keyv = new Keyv('redis://localhost:6379');
- *
- * const keyvStore: AsyncCacheStore = {
- *   async get(key: string) {
- *     return await keyv.get(key);
- *   },
- *   async set(key: string, value: unknown) {
- *     await keyv.set(key, value, 100000); // 100000ms TTL
- *   },
- *   async clear(pattern?: string) {
- *     if (!pattern) {
- *       await keyv.clear();
- *     }
- *     // Note: Keyv doesn't have native pattern matching
- *     // Pattern matching requires custom implementation
- *   }
- * };
- * ```
- */
-export interface AsyncCacheStore {
-  /**
-   * Retrieve a value from cache
-   * @param key - Cache key
-   * @returns Promise resolving to the cached value, or undefined if not found
-   */
-  get(key: string): Promise<unknown>;
-
-  /**
-   * Store a value in cache
-   * @param key - Cache key
-   * @param value - Value to store (must be serializable for external stores)
-   * @returns Promise that resolves when storage is complete
-   */
-  set(key: string, value: NonNullable<unknown>): Promise<void>;
-
-  /**
-   * Clear cache entries
-   * @param pattern - Optional pattern to match keys (implementation-specific)
-   *                  If not provided, clears all entries
-   * @returns Promise that resolves when clearing is complete
-   */
-  clear(pattern?: string): Promise<void>;
-}
-
-/**
- * Cache configuration options
- */
-export interface CacheOptions {
-  /**
-   * Maximum number of entries (default: 100)
-   * Only used with default LRU store. Ignored when custom store is provided.
-   */
-  max?: number;
-
-  /**
-   * Time-to-live in milliseconds for the underlying LRU store.
-   *
-   * When unset, entries are not expired by time — only evicted when the LRU
-   * exceeds `max`. SWR manages its own freshness/staleness via the envelope
-   * timestamps (`freshUntil` / `staleUntil`), so leaving this unset is the
-   * right choice when relying on {@link CacheManager.swr}: a short LRU TTL
-   * would otherwise evict envelopes long before their stale window expires
-   * and defeat the "serve stale on upstream failure" fallback.
-   *
-   * Only used with default LRU store. Ignored when custom store is provided.
-   */
-  ttl?: number;
-
-  /**
-   * Custom async cache store implementation
-   * If provided, max and ttl options are ignored
-   *
-   * @example Redis store
-   * ```typescript
-   * import { createClient } from 'redis';
-   *
-   * const redisClient = createClient();
-   * await redisClient.connect();
-   *
-   * const client = await CockpitAPI({
-   *   endpoint: 'https://cms.example.com/api/graphql',
-   *   cache: {
-   *     store: {
-   *       async get(key) {
-   *         const val = await redisClient.get(key);
-   *         return val ? JSON.parse(val) : undefined;
-   *       },
-   *       async set(key, value) {
-   *         await redisClient.set(key, JSON.stringify(value), { EX: 100 });
-   *       },
-   *       async clear(pattern) {
-   *         if (pattern) {
-   *           const keys = await redisClient.keys(`${pattern}*`);
-   *           if (keys.length > 0) await redisClient.del(keys);
-   *         } else {
-   *           await redisClient.flushDb();
-   *         }
-   *       }
-   *     }
-   *   }
-   * });
-   * ```
-   */
-  store?: AsyncCacheStore;
-
-  /**
-   * Default SWR windows applied to every {@link CacheManager.swr} call that
-   * doesn't supply per-call `freshMs` / `staleMs`. Useful for configuring
-   * stale-while-revalidate behaviour centrally without touching every method.
-   *
-   * Per-call options on `swr()` still win. Unset fields fall back to
-   * {@link DEFAULT_SWR_FRESH_MS} and {@link DEFAULT_SWR_STALE_MS}.
-   *
-   * @example 5-minute fresh window, 24-hour stale fallback (survives upstream outages)
-   * ```typescript
-   * const client = await CockpitAPI({
-   *   cache: {
-   *     store: redisStore,
-   *     swr: { freshMs: 5 * 60_000, staleMs: 24 * 60 * 60_000 },
-   *   }
-   * });
-   * ```
-   */
-  swr?: SwrDefaults;
-}
-
-/**
- * Async cache manager interface
- * All cache operations return promises in v3.0.0+
- */
-export interface CacheManager {
-  /**
-   * Get a value from cache
-   * @param key - Cache key (will be prefixed internally)
-   * @returns Promise resolving to cached value or undefined if not found
-   */
-  get(key: string): Promise<unknown>;
-
-  /**
-   * Set a value in cache
-   * @param key - Cache key (will be prefixed internally)
-   * @param value - Value to cache
-   * @returns Promise that resolves when caching is complete
-   */
-  set(key: string, value: NonNullable<unknown>): Promise<void>;
-
-  /**
-   * Clear cache entries matching pattern
-   * @param pattern - Optional pattern to match (relative to cache prefix)
-   * @returns Promise that resolves when clearing is complete
-   */
-  clear(pattern?: string): Promise<void>;
-
-  /**
-   * Stale-while-revalidate fetch wrapper.
-   *
-   * - Fresh hit (now < freshUntil): returns cached data immediately.
-   * - Stale hit (freshUntil <= now < staleUntil): returns cached data and
-   *   triggers a single background revalidation (deduped per-instance).
-   * - Cold or expired: fetches synchronously, deduping concurrent callers
-   *   for the same key. On upstream error, falls back to stale data if
-   *   present; otherwise rethrows.
-   */
-  swr<T>(
-    key: string,
-    fetcher: () => Promise<T | null>,
-    options?: SwrOptions,
-  ): Promise<T | null>;
-}
-
-/**
- * Creates a default LRU-based async cache store
- * Wraps lru-cache in async interface for consistency
- */
-function createDefaultLRUStore(options: CacheOptions): AsyncCacheStore {
-  // No LRU TTL by default: SWR manages freshness/staleness via the envelope
-  // timestamps. A short LRU TTL would evict envelopes before their stale
-  // window expires and defeat the "serve stale on upstream failure" fallback.
-  // Callers can still opt into a hard time-based eviction by passing `ttl`.
-  const cache = new LRUCache<string, NonNullable<unknown>>({
-    max: options.max ?? 100,
-    ...(options.ttl !== undefined && { ttl: options.ttl }),
-    allowStale: false,
-  });
-
+/** In-memory LRU store; the manager copies, so it stores references as-is */
+export function createLRUCacheStore({
+  max = DEFAULT_CACHE_MAX,
+}: { max?: number } = {}): AsyncCacheStore {
+  const lru = new LRUCache<string, CacheValue>({ max });
   return {
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async get(key: string): Promise<unknown> {
-      return cache.get(key);
+    get: (key): Promise<unknown> => Promise.resolve(lru.get(key)),
+    set: (key, value): Promise<void> => {
+      lru.set(key, value);
+      return Promise.resolve();
     },
-
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async set(key: string, value: NonNullable<unknown>): Promise<void> {
-      cache.set(key, value);
-    },
-
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async clear(pattern?: string): Promise<void> {
-      if (pattern === undefined) {
-        cache.clear();
-      } else {
-        for (const key of cache.keys()) {
-          if (key.startsWith(pattern)) {
-            cache.delete(key);
-          }
-        }
+    clear: (pattern): Promise<void> => {
+      for (const key of lru.keys()) {
+        if (pattern === undefined || key.startsWith(pattern)) lru.delete(key);
       }
+      return Promise.resolve();
     },
   };
 }
 
-/**
- * Creates a cache manager with prefixed keys and async operations
- * Each call creates a new cache instance - no shared state
- *
- * @param cachePrefix - Prefix for all cache keys (includes endpoint and tenant)
- * @param options - Cache configuration options
- * @returns Async cache manager
- *
- * @example Using default LRU cache
- * ```typescript
- * const cache = createCacheManager('https://cms.example.com:default:', {
- *   max: 100,
- * });
- *
- * await cache.set('key1', { data: 'value' });
- * const value = await cache.get('key1');
- * await cache.clear('ROUTE');
- * ```
- *
- * @example Using custom Redis store
- * ```typescript
- * const redisClient = createClient();
- * await redisClient.connect();
- *
- * const cache = createCacheManager('https://cms.example.com:default:', {
- *   store: {
- *     async get(key) { ... },
- *     async set(key, value) { ... },
- *     async clear(pattern) { ... }
- *   }
- * });
- * ```
- */
+/** Cache manager with its own key prefix and in-flight map (no shared state) */
 export function createCacheManager(
   cachePrefix: string,
   options: CacheOptions = {},
 ): CacheManager {
-  // Use custom store if provided, otherwise create default LRU store
-  const store = options.store ?? createDefaultLRUStore(options);
-
-  const managerSwrDefaults: SwrDefaults = options.swr ?? {};
-  const prefixedKey = (key: string): string => `${cachePrefix}${key}`;
+  const store = options.store ?? createLRUCacheStore(options);
+  const freshMs = options.swr?.freshMs ?? DEFAULT_SWR_FRESH_MS;
+  const staleMs = options.swr?.staleMs ?? DEFAULT_SWR_STALE_MS;
   const inflight = new Map<string, Promise<unknown>>();
 
-  const manager: CacheManager = {
-    async get(key: string): Promise<unknown> {
-      return await store.get(prefixedKey(key));
-    },
+  const read = (key: string): Promise<unknown> =>
+    store.get(`${cachePrefix}${key}`);
+  const write = (key: string, value: CacheValue): Promise<void> =>
+    store.set(`${cachePrefix}${key}`, copy(value));
+  // The store has no delete: an expired tombstone is never served
+  const expire = (key: string): Promise<void> =>
+    write(key, { data: null, freshUntil: 0, staleUntil: 0 });
 
-    async set(key: string, value: NonNullable<unknown>): Promise<void> {
-      await store.set(prefixedKey(key), value);
-    },
+  return {
+    get: async (key): Promise<unknown> => copy(await read(key)),
+    set: write,
 
-    async clear(pattern?: string): Promise<void> {
-      const prefix =
-        pattern !== undefined ? `${cachePrefix}${pattern}` : cachePrefix;
-      await store.clear(prefix);
+    async clear(pattern = ""): Promise<void> {
+      // Pending fetches must neither write back nor be joined
+      for (const key of inflight.keys()) {
+        if (key.startsWith(pattern)) inflight.delete(key);
+      }
+      await store.clear(`${cachePrefix}${pattern}`);
     },
 
     async swr<T>(
       key: string,
       fetcher: () => Promise<T | null>,
-      swrOptions: SwrOptions = {},
     ): Promise<T | null> {
-      const freshMs =
-        swrOptions.freshMs ??
-        managerSwrDefaults.freshMs ??
-        DEFAULT_SWR_FRESH_MS;
-      const staleMs =
-        swrOptions.staleMs ??
-        managerSwrDefaults.staleMs ??
-        DEFAULT_SWR_STALE_MS;
       const now = Date.now();
-      const entry = (await manager.get(key)) as SwrEnvelope<T> | undefined;
-      const isEnvelope =
-        entry !== undefined &&
-        typeof entry === "object" &&
-        "freshUntil" in entry;
+      const stored = await read(key);
+      const entry = isEnvelope<T>(stored) ? stored : undefined;
+      if (entry && now < entry.freshUntil) return copy(entry.data);
+      const hadData = entry !== undefined && entry.data !== null;
 
-      if (isEnvelope && now < entry.freshUntil) {
-        return entry.data;
-      }
-
-      const runFetch = async (): Promise<T | null> => {
-        const fresh = await fetcher();
-        if (fresh !== null && fresh !== undefined) {
-          const t = Date.now();
-          await manager.set(key, {
-            data: fresh,
-            freshUntil: t + freshMs,
-            staleUntil: t + staleMs,
-          });
-        }
-        return fresh;
-      };
-
-      if (isEnvelope && now < entry.staleUntil) {
-        if (!inflight.has(key)) {
-          const revalidate = runFetch()
-            .catch((err: unknown) => {
-              logger.warn(`SWR background revalidate failed for ${key}`, err);
-              return null;
-            })
-            .finally(() => {
-              inflight.delete(key);
-            });
-          inflight.set(key, revalidate);
-        }
-        return entry.data;
-      }
-
-      let promise = inflight.get(key) as Promise<T | null> | undefined;
-      if (!promise) {
-        promise = runFetch().finally(() => {
-          inflight.delete(key);
+      // Only the fetch registered in `inflight` may write back (clear() drops it)
+      const refresh = (): Promise<T | null> => {
+        const promise: Promise<T | null> = (async (): Promise<T | null> => {
+          const current = (): boolean => inflight.get(key) === promise;
+          try {
+            const fresh = await fetcher();
+            if (!current()) return fresh;
+            if (fresh !== null && fresh !== undefined) {
+              const t = Date.now();
+              await write(key, {
+                data: fresh,
+                freshUntil: t + freshMs,
+                staleUntil: t + staleMs,
+              });
+            } else if (hadData) {
+              await expire(key); // 404: never serve the deleted data again
+            }
+            return fresh;
+          } catch (err) {
+            const revoked =
+              err instanceof CockpitHttpError &&
+              (err.status === 401 || err.status === 403);
+            // Data fetched with revoked credentials must not be served
+            if (revoked && hadData && current()) {
+              await expire(key).catch((e: unknown) => {
+                logger.warn(`Cockpit: Failed to expire ${key}`, e);
+              });
+            }
+            throw err;
+          }
+        })().finally(() => {
+          if (inflight.get(key) === promise) inflight.delete(key);
         });
         inflight.set(key, promise);
-      }
-      try {
-        return await promise;
-      } catch (err) {
-        if (isEnvelope) {
-          logger.warn(`Cockpit unreachable, serving stale for ${key}`, err);
-          return entry.data;
+        return promise;
+      };
+
+      // Stale window: serve stale data, refresh in the background
+      if (entry && now < entry.staleUntil) {
+        if (!inflight.has(key)) {
+          refresh().catch((err: unknown) => {
+            logger.warn(`SWR background revalidate failed for ${key}`, err);
+          });
         }
-        throw err;
+        return copy(entry.data);
       }
+
+      // Cold or expired: wait for upstream; joiners get their own copy
+      const joined = inflight.get(key) as Promise<T | null> | undefined;
+      return joined ? copy(await joined) : refresh();
     },
   };
-
-  return manager;
 }
 
-/**
- * Creates a no-op cache manager that doesn't cache anything
- * Used when caching is explicitly disabled
- *
- * @returns No-op cache manager
- *
- * @example
- * ```typescript
- * const cache = createNoOpCacheManager();
- * await cache.set('key', 'value'); // Does nothing
- * const result = await cache.get('key'); // Always returns undefined
- * await cache.clear(); // Does nothing
- * ```
- */
+/** Cache manager for `cache: false`: nothing is stored, swr always fetches */
 export function createNoOpCacheManager(): CacheManager {
   return {
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async get(): Promise<undefined> {
-      return undefined;
-    },
-
-    async set(): Promise<void> {
-      // No-op
-    },
-
-    async clear(): Promise<void> {
-      // No-op
-    },
-
-    async swr<T>(
-      _key: string,
-      fetcher: () => Promise<T | null>,
-    ): Promise<T | null> {
-      return fetcher();
-    },
+    get: () => Promise.resolve(undefined),
+    set: () => Promise.resolve(),
+    clear: () => Promise.resolve(),
+    swr: (_key, fetcher) => fetcher(),
   };
 }

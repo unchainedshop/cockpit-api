@@ -1,37 +1,22 @@
 import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert";
-import { createHttpClient } from "./http.ts";
-import type { CockpitConfig } from "./config.ts";
-import type { ResponseTransformer } from "../transformers/image-path.ts";
-import { createMockResponse } from "../__tests__/test-helpers.ts";
+import { CockpitHttpError, createHttpClient, type HttpClient } from "./http.ts";
+import { createConfig, type CockpitAPIOptions } from "./config.ts";
+import { fetchCall, withRedirectServer } from "../__tests__/test-helpers.ts";
+
+const url = (path = "/api/test", query = ""): URL => new URL(`https://cms.example.com${path}${query}`);
+const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status });
+const client = (options: CockpitAPIOptions = {}, transform?: (json: unknown) => unknown): HttpClient =>
+  createHttpClient(createConfig({ endpoint: "https://cms.example.com/api/graphql", ...options }), transform);
+const admin: CockpitAPIOptions = { apiKey: "secret-key", useAdminAccess: true };
 
 describe("createHttpClient", () => {
   let mockFetch: ReturnType<typeof mock.fn<typeof fetch>>;
   const originalFetch = globalThis.fetch;
-
-  const createTestConfig = (overrides: Partial<CockpitConfig> = {}): CockpitConfig => ({
-    endpoint: new URL("https://test.example.com/api"),
-    useAdminAccess: false,
-    defaultLanguage: "de",
-    cachePrefix: "test:prefix:",
-    ...overrides,
-  });
-
-  const identityTransformer: ResponseTransformer = {
-    transform: <T>(data: T) => data,
-  };
-
-  const doubleTransformer: ResponseTransformer = {
-    transform: <T>(data: T) => {
-      if (typeof data === "object" && data !== null && "value" in data) {
-        return { ...data, value: (data as { value: number }).value * 2 } as T;
-      }
-      return data;
-    },
-  };
+  const sent = (index = 0) => fetchCall(mockFetch, index)[1];
 
   beforeEach(() => {
-    mockFetch = mock.fn<typeof fetch>();
+    mockFetch = mock.fn<typeof fetch>(async () => json({ value: 1 }));
     globalThis.fetch = mockFetch;
   });
 
@@ -40,405 +25,188 @@ describe("createHttpClient", () => {
     mock.reset();
   });
 
-  describe("fetch (GET requests)", () => {
-    it("makes GET request and returns transformed JSON", async () => {
-      const responseData = { name: "test" };
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: responseData })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      const result = await client.fetch<{ name: string }>("https://test.example.com/api/test");
-
-      assert.deepStrictEqual(result, responseData);
-      assert.strictEqual(mockFetch.mock.callCount(), 1);
+  describe("requests", () => {
+    it("GETs and returns transformed JSON (transform may work in place)", async () => {
+      const http = client({}, (data) => {
+        (data as { value: number }).value *= 2;
+        return data;
+      });
+      assert.deepStrictEqual(await http.fetch(url()), { value: 2 });
+      assert.strictEqual(sent().method, "GET");
     });
 
-    it("applies response transformer", async () => {
-      const responseData = { value: 10 };
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: responseData })),
-      );
-
-      const client = createHttpClient(createTestConfig(), doubleTransformer);
-      const result = await client.fetch<{ value: number }>("https://test.example.com/api/test");
-
-      assert.deepStrictEqual(result, { value: 20 });
+    it("returns the raw JSON when the transform throws", async () => {
+      const http = client({}, () => {
+        throw new Error("boom");
+      });
+      assert.deepStrictEqual(await http.fetch(url()), { value: 1 });
     });
 
-    it("resolves a transformer factory for every JSON response", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: { value: 10 } })),
-      );
-      let resolved = 0;
-      const client = createHttpClient(createTestConfig(), async () => {
-        resolved += 1;
-        return doubleTransformer;
+    it("POSTs JSON bodies", async () => {
+      await client().post(url(), { name: "test" });
+      assert.strictEqual(sent().method, "POST");
+      assert.strictEqual(sent().headers["Content-Type"], "application/json");
+      assert.strictEqual(sent().body, JSON.stringify({ name: "test" }));
+    });
+
+    it("sends no body for DELETE and undefined POST bodies", async () => {
+      await client().delete(url());
+      await client().post(url(), undefined);
+      assert.strictEqual(sent(0).method, "DELETE");
+      for (const i of [0, 1]) {
+        assert.strictEqual(sent(i).body, undefined);
+        assert.deepStrictEqual(sent(i).headers, {});
+      }
+    });
+
+    it("POSTs FormData without a Content-Type (fetch adds the boundary)", async () => {
+      const form = new FormData();
+      form.append("field", "x");
+      assert.deepStrictEqual(await client().request("POST", url(), { form }), { value: 1 });
+      assert.strictEqual(sent().body, form);
+      assert.deepStrictEqual(sent().headers, {});
+    });
+
+    it("returns text without transforming it", async () => {
+      mockFetch.mock.mockImplementation(async () => new Response("https://example.com/image.jpg"));
+      const transform = mock.fn((data: unknown) => data);
+      const text = await client({}, transform).request<string>("GET", url(), { text: true });
+      assert.strictEqual(text, "https://example.com/image.jpg");
+      assert.strictEqual(transform.mock.callCount(), 0);
+    });
+
+    for (const text of [false, true]) {
+      it(`returns null for 404 (text: ${String(text)})`, async () => {
+        mockFetch.mock.mockImplementation(async () => new Response("missing", { status: 404 }));
+        assert.strictEqual(await client().request("GET", url(), { text }), null);
+      });
+    }
+  });
+
+  describe("authentication", () => {
+    const cases: [name: string, options: CockpitAPIOptions, perRequest: boolean | undefined, key: string | undefined][] = [
+      ["public by default", { apiKey: "secret-key" }, undefined, undefined],
+      ["admin from the factory", admin, undefined, "secret-key"],
+      ["per-request true overrides factory false", { apiKey: "secret-key" }, true, "secret-key"],
+      ["per-request false overrides factory true", admin, false, undefined],
+      ["per-request false without a key", { useAdminAccess: true }, false, undefined],
+    ];
+    for (const [name, options, useAdminAccess, key] of cases) {
+      it(name, async () => {
+        const http = client(options);
+        const access = useAdminAccess === undefined ? {} : { useAdminAccess };
+        await http.fetch(url(), access);
+        await http.post(url(), {}, access);
+        await http.request("POST", url(), { form: new FormData(), ...access });
+        for (const i of [0, 1, 2]) assert.strictEqual(sent(i).headers["api-Key"], key);
+      });
+    }
+
+    const missingKey: [name: string, options: CockpitAPIOptions, perRequest: boolean | undefined][] = [
+      ["factory admin without apiKey", { useAdminAccess: true }, undefined],
+      ["per-request admin without apiKey", {}, true],
+    ];
+    for (const [name, options, useAdminAccess] of missingKey) {
+      it(`throws instead of sending a public request: ${name}`, async () => {
+        const http = client(options);
+        const access = useAdminAccess === undefined ? {} : { useAdminAccess };
+        await assert.rejects(http.fetch(url(), access), /Cockpit: useAdminAccess requires an apiKey/);
+        await assert.rejects(
+          http.request("POST", url(), { form: new FormData(), ...access }),
+          /Cockpit: useAdminAccess requires an apiKey/,
+        );
+        assert.strictEqual(mockFetch.mock.callCount(), 0);
+      });
+    }
+
+    it("accessScope reflects the effective access without exposing the key", () => {
+      const pub = client({ apiKey: "secret-key" });
+      const adm = client(admin);
+      assert.strictEqual(pub.accessScope(), "public");
+      assert.strictEqual(adm.accessScope(false), "public");
+      assert.match(adm.accessScope(), /^admin-[0-9a-f]{12}$/);
+      assert.strictEqual(pub.accessScope(true), adm.accessScope());
+      assert.ok(!adm.accessScope().includes("secret-key"));
+    });
+
+    it("never follows redirects with the api-Key (credentials stay on the origin)", async () => {
+      await client(admin).fetch(url());
+      assert.strictEqual(sent().redirect, "error");
+    });
+
+    it("explains a refused redirect (real fetch against a local 302)", async () => {
+      globalThis.fetch = originalFetch;
+      await withRedirectServer(async (endpoint) => {
+        const http = createHttpClient(createConfig({ endpoint, ...admin }));
+        const err = await http
+          .fetch(new URL("/api/content/items/posts?x=1", endpoint))
+          .then(() => assert.fail("expected rejection"), (e: unknown) => e as Error);
+        assert.strictEqual(err.message, "Cockpit: refusing to follow redirect for authenticated request (/api/content/items/posts)");
+        assert.ok(err.cause instanceof TypeError);
+      });
+    });
+
+    it("keeps the default redirect behaviour for unauthenticated requests", async () => {
+      await client({ apiKey: "secret-key" }).fetch(url());
+      assert.strictEqual(sent().redirect, undefined);
+    });
+  });
+
+  describe("timeouts", () => {
+    const hangUntilAborted: typeof fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason as Error));
       });
 
-      assert.deepStrictEqual(await client.fetch("https://test.example.com/api/a"), { value: 20 });
-      assert.deepStrictEqual(await client.fetch("https://test.example.com/api/b"), { value: 20 });
-      assert.strictEqual(resolved, 2);
-
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ ok: false, status: 404 })),
-      );
-      assert.strictEqual(await client.fetch("https://test.example.com/api/missing"), null);
-      assert.strictEqual(resolved, 2); // nothing to transform
-    });
-
-    it("returns null for 404 responses", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ ok: false, status: 404 })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      const result = await client.fetch("https://test.example.com/api/notfound");
-
-      assert.strictEqual(result, null);
-    });
-
-    it("throws for non-OK non-404 responses", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(
-          createMockResponse({
-            ok: false,
-            status: 500,
-            url: "https://test.example.com/api/error",
-            textBody: "Internal server error",
-          }),
-        ),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-
+    it("rejects a hung request with a timeout error (path only, no query)", async () => {
+      mockFetch.mock.mockImplementation(hangUntilAborted);
       await assert.rejects(
-        () => client.fetch("https://test.example.com/api/error"),
-        /Cockpit: Error accessing.*500.*Internal server error/,
+        () => client({ timeout: 20 }).fetch(url("/api/pages/pages", "?limit=1")),
+        /^Error: Cockpit: request timed out after 20ms \(\/api\/pages\/pages\)$/,
       );
     });
 
-    it("does not include api-Key header when useAdminAccess is false", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: false });
-      const client = createHttpClient(config, identityTransformer);
-      await client.fetch("https://test.example.com/api/test");
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers?.["api-Key"], undefined);
-    });
-
-    it("includes api-Key header when useAdminAccess is true", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: true });
-      const client = createHttpClient(config, identityTransformer);
-      await client.fetch("https://test.example.com/api/test");
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["api-Key"], "secret-key");
-    });
-
-    it("per-request useAdminAccess=true overrides config false", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: false });
-      const client = createHttpClient(config, identityTransformer);
-      await client.fetch("https://test.example.com/api/test", { useAdminAccess: true });
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["api-Key"], "secret-key");
-    });
-
-    it("per-request useAdminAccess=false overrides config true", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: true });
-      const client = createHttpClient(config, identityTransformer);
-      await client.fetch("https://test.example.com/api/test", { useAdminAccess: false });
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers?.["api-Key"], undefined);
-    });
-
-    it("does not add api-Key header even when useAdminAccess is true but no apiKey", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ useAdminAccess: true }); // no apiKey
-      const client = createHttpClient(config, identityTransformer);
-      await client.fetch("https://test.example.com/api/test");
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers?.["api-Key"], undefined);
-    });
-
-    it("passes custom headers through", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      await client.fetch("https://test.example.com/api/test", {
-        headers: { "X-Custom": "value" },
-      });
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["X-Custom"], "value");
+    it("passes a signal for every request type, none when disabled", async () => {
+      const http = client({ timeout: 1000 });
+      await http.fetch(url());
+      await http.request("GET", url(), { text: true });
+      await http.post(url(), {});
+      await http.request("POST", url(), { form: new FormData() });
+      await http.delete(url());
+      for (const i of [0, 1, 2, 3, 4]) assert.ok(sent(i).signal instanceof AbortSignal, `call ${String(i)}`);
+      await client({ timeout: 0 }).fetch(url());
+      assert.strictEqual(sent(5).signal, undefined);
     });
   });
 
-  describe("post (POST requests)", () => {
-    it("makes POST request with JSON body", async () => {
-      const responseData = { id: "123" };
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: responseData })),
-      );
+  describe("errors", () => {
+    for (const text of [false, true]) {
+      it(`throws CockpitHttpError with status and url without query (text: ${String(text)})`, async () => {
+        mockFetch.mock.mockImplementation(async () => new Response("denied", { status: 403 }));
+        const err = await client()
+          .request("GET", url("/api/content/items/posts", "?filter=secret"), { text })
+          .then(() => assert.fail("expected rejection"), (e: unknown) => e);
 
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      const result = await client.post<{ id: string }>("https://test.example.com/api/items", {
-        name: "test",
+        assert.ok(err instanceof CockpitHttpError);
+        assert.strictEqual(err.name, "CockpitHttpError");
+        assert.strictEqual(err.status, 403);
+        assert.strictEqual(err.url, "https://cms.example.com/api/content/items/posts");
+        assert.strictEqual(err.message, "Cockpit: Error accessing /api/content/items/posts (403)");
       });
+    }
 
-      assert.deepStrictEqual(result, responseData);
-
-      const call = mockFetch.mock.calls[0];
-      const options = call.arguments[1];
-      assert.strictEqual(options?.method, "POST");
-      assert.strictEqual(
-        (options?.headers as Record<string, string>)["Content-Type"],
-        "application/json",
-      );
-      assert.strictEqual(options?.body, JSON.stringify({ name: "test" }));
-    });
-
-    it("includes api-Key header when useAdminAccess is true", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: true });
-      const client = createHttpClient(config, identityTransformer);
-      await client.post("https://test.example.com/api/items", { data: "test" });
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["api-Key"], "secret-key");
-    });
-
-    it("per-request useAdminAccess overrides config", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: false });
-      const client = createHttpClient(config, identityTransformer);
-      await client.post("https://test.example.com/api/items", { data: "test" }, { useAdminAccess: true });
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["api-Key"], "secret-key");
-    });
-
-    it("applies response transformer", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: { value: 5 } })),
-      );
-
-      const client = createHttpClient(createTestConfig(), doubleTransformer);
-      const result = await client.post<{ value: number }>("https://test.example.com/api/items", {});
-
-      assert.deepStrictEqual(result, { value: 10 });
-    });
-
-    it("merges custom headers with Content-Type", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      await client.post(
-        "https://test.example.com/api/items",
-        { data: "test" },
-        { headers: { "X-Custom": "value" } },
-      );
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["Content-Type"], "application/json");
-      assert.strictEqual(headers["X-Custom"], "value");
-    });
-  });
-
-  describe("delete (DELETE requests)", () => {
-    it("makes DELETE request", async () => {
-      const responseData = { deleted: true };
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: responseData })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      const result = await client.delete<{ deleted: boolean }>(
-        "https://test.example.com/api/items/123",
-      );
-
-      assert.deepStrictEqual(result, responseData);
-
-      const call = mockFetch.mock.calls[0];
-      const options = call.arguments[1];
-      assert.strictEqual(options?.method, "DELETE");
-      assert.strictEqual(
-        (options?.headers as Record<string, string>)["Content-Type"],
-        "application/json",
-      );
-    });
-
-    it("includes api-Key header when useAdminAccess is true", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: true });
-      const client = createHttpClient(config, identityTransformer);
-      await client.delete("https://test.example.com/api/items/123");
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["api-Key"], "secret-key");
-    });
-
-    it("per-request useAdminAccess overrides config", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const config = createTestConfig({ apiKey: "secret-key", useAdminAccess: false });
-      const client = createHttpClient(config, identityTransformer);
-      await client.delete("https://test.example.com/api/items/123", { useAdminAccess: true });
-
-      const call = mockFetch.mock.calls[0];
-      const headers = call.arguments[1]?.headers as Record<string, string>;
-      assert.strictEqual(headers["api-Key"], "secret-key");
-    });
-  });
-
-  describe("header normalization edge cases", () => {
-    it("handles array headers", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      await client.fetch("https://test.example.com/api/test", {
-        headers: ["header1", "header2"] as unknown as Record<string, string>,
-      });
-
-      // Should not throw and should ignore invalid headers
-      assert.strictEqual(mockFetch.mock.callCount(), 1);
-    });
-
-    it("handles null headers", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      await client.fetch("https://test.example.com/api/test", {
-        headers: null as unknown as Record<string, string>,
-      });
-
-      // Should not throw
-      assert.strictEqual(mockFetch.mock.callCount(), 1);
-    });
-
-    it("handles undefined headers", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: {} })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      await client.fetch("https://test.example.com/api/test", {
-        headers: undefined,
-      });
-
-      // Should not throw
-      assert.strictEqual(mockFetch.mock.callCount(), 1);
-    });
-  });
-
-  describe("fetchText method", () => {
-    it("returns text response", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ textBody: "https://example.com/image.jpg" })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      const result = await client.fetchText("https://test.example.com/api/asset");
-
-      assert.strictEqual(result, "https://example.com/image.jpg");
-    });
-
-    it("returns null for 404 response", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ ok: false, status: 404 })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      const result = await client.fetchText("https://test.example.com/api/notfound");
-
-      assert.strictEqual(result, null);
-    });
-
-    it("throws for non-OK non-404 responses", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(
-          createMockResponse({
-            ok: false,
-            status: 500,
-            url: "https://test.example.com/api/error",
-            textBody: "Server error",
-          }),
-        ),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-
-      await assert.rejects(
-        () => client.fetchText("https://test.example.com/api/error"),
-        /Cockpit: Error accessing.*500.*Server error/,
-      );
-    });
-  });
-
-  describe("post with undefined body", () => {
-    it("handles undefined body correctly", async () => {
-      mockFetch.mock.mockImplementation(() =>
-        Promise.resolve(createMockResponse({ body: { success: true } })),
-      );
-
-      const client = createHttpClient(createTestConfig(), identityTransformer);
-      await client.post("https://test.example.com/api/test", undefined);
-
-      const call = mockFetch.mock.calls[0];
-      const options = call.arguments[1];
-      // When body is undefined, it should not be set in options
-      assert.strictEqual(options?.body, undefined);
+    it("puts the truncated upstream body into cause", async () => {
+      mockFetch.mock.mockImplementation(async () => new Response("x".repeat(5000), { status: 502 }));
+      const err = await client()
+        .fetch(url("/api/x", "?filter=secret"))
+        .then(
+          () => assert.fail("expected rejection"),
+          (e: unknown) => e as Error & { cause: { status: number; url: string; body: string } },
+        );
+      assert.strictEqual(err.cause.status, 502);
+      assert.strictEqual(err.cause.url, "https://cms.example.com/api/x");
+      assert.strictEqual(err.cause.body, "x".repeat(500));
     });
   });
 });
