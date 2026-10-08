@@ -2,19 +2,8 @@
  * Content API methods
  */
 
-import type { HttpClient } from "../core/http.ts";
-import type { UrlBuilder } from "../core/url-builder.ts";
-import type { CacheManager } from "../core/cache.ts";
-import { hashOpts } from "../core/cache.ts";
-import { requireParam, validatePathSegment } from "../core/validation.ts";
-
-export interface MethodContext {
-  readonly http: HttpClient;
-  readonly url: UrlBuilder;
-  readonly cache: CacheManager;
-  readonly endpoint: string;
-  readonly tenant?: string;
-}
+import { logger } from "../cockpit-logger.ts";
+import { get, segment, withTyped, type MethodContext } from "./context.ts";
 
 export interface ListQueryOptions {
   limit?: number;
@@ -28,24 +17,24 @@ export interface ListQueryOptions {
   useAdminAccess?: boolean;
 }
 
-export interface ContentItemQueryOptions extends ListQueryOptions {
+export interface ContentItemQueryOptions {
   model: string;
+  /** Omit for singletons */
   id?: string;
+  locale?: string;
+  fields?: Record<string, 0 | 1>;
+  populate?: number;
   queryParams?: Record<string, unknown>;
+  /** Override the client-level useAdminAccess setting for this request */
+  useAdminAccess?: boolean;
 }
 
 export interface ContentListQueryOptions extends ListQueryOptions {
   queryParams?: Record<string, unknown>;
 }
 
-/**
- * Query options for Unchained content endpoint (supports unpublished items)
- */
 export interface UnchainedContentListQueryOptions extends ContentListQueryOptions {
-  /**
-   * Include unpublished items in results.
-   * Requires admin access with content/{model}/read permission.
-   */
+  /** Include unpublished items (needs content/{model}/read permission) */
   includeUnpublished?: boolean;
 }
 
@@ -92,66 +81,35 @@ export interface CockpitTreeNode<T = CockpitContentItem> {
   data?: T;
 }
 
-/**
- * Metadata returned with paginated content responses
- */
+/** Metadata of paginated list responses */
 export interface CockpitListMeta {
   total?: number;
   [key: string]: unknown;
 }
 
-/**
- * Wrapper response format returned by Cockpit when using pagination (skip parameter)
- */
+/** List response; `meta` is present when Cockpit paginates (`skip`) */
 export interface CockpitListResponse<T> {
   data: T[];
   meta?: CockpitListMeta;
 }
 
-export const normalizeListResponse = <T>(
-  result: T[] | CockpitListResponse<T> | null,
-): CockpitListResponse<T> | null => {
-  if (result === null) return null;
-  if (Array.isArray(result)) return { data: result };
-  return result;
-};
+/** Bare arrays become `{ data }` */
+export const toList = <T>(raw: unknown): CockpitListResponse<T> =>
+  Array.isArray(raw) ? { data: raw as T[] } : (raw as CockpitListResponse<T>);
 
 export interface ContentMethods {
   getContentItem<T = unknown>(
     options: ContentItemQueryOptions,
   ): Promise<T | null>;
-  /**
-   * Get multiple content items from a collection.
-   *
-   * @returns Always returns `CockpitListResponse<T>` with data and optional meta.
-   * Returns `null` if collection doesn't exist.
-   *
-   * @example
-   * const response = await cockpit.getContentItems('posts', { limit: 10 });
-   * // response: { data: Post[], meta?: { total: number } } | null
-   * const items = response?.data || [];
-   * const total = response?.meta?.total;
-   */
+  /** Items of a collection; `null` if it doesn't exist */
   getContentItems<T = CockpitContentItem>(
     model: string,
     options?: ContentListQueryOptions,
   ): Promise<CockpitListResponse<T> | null>;
   /**
-   * Get content items including unpublished via Unchained module.
-   *
-   * Requires admin access with content/{model}/read permission.
-   *
-   * @returns Always returns `CockpitListResponse<T>` with data array.
-   * Returns `null` if model doesn't exist.
-   *
-   * @example
-   * ```typescript
-   * const response = await cockpit.getUnchainedContentItems('posts', {
-   *   limit: 10,
-   *   includeUnpublished: true,
-   * });
-   * const items = response?.data || [];
-   * ```
+   * Items including unpublished ones (Unchained module, always admin access).
+   * For editorial read-modify-write: never cached, page links never resolved
+   * (so writing an item back never persists resolved routes).
    */
   getUnchainedContentItems<T = CockpitContentItem>(
     model: string,
@@ -164,43 +122,58 @@ export interface ContentMethods {
   getAggregateModel<T = unknown>(
     options: AggregateQueryOptions,
   ): Promise<T[] | null>;
+  /**
+   * Creates or updates an item; on success this client's cached reads of
+   * `model` are cleared. Page links in the response are never resolved.
+   */
   postContentItem<T = unknown>(
     model: string,
     item: Record<string, unknown>,
   ): Promise<T | null>;
+  /** Deletes an item; clears cached reads of `model` like `postContentItem` */
   deleteContentItem<T = unknown>(model: string, id: string): Promise<T | null>;
 }
 
+/** Cache key prefixes of a model's reads (see `cacheKey`) */
+export const contentCachePrefixes = (model: string): string[] => [
+  `/content/items/${model}|`,
+  `/content/item/${model}|`,
+  `/content/item/${model}/`,
+  `/content/tree/${model}|`,
+  `/content/aggregate/${model}|`,
+];
+
 export function createContentMethods(ctx: MethodContext): ContentMethods {
-  const buildFetchOptions = (
-    useAdminAccess?: boolean,
-  ): { useAdminAccess: boolean } | Record<string, never> =>
-    useAdminAccess !== undefined ? { useAdminAccess } : {};
+  // A failing cache store must not turn a successful write into an error
+  const invalidate = async (model: string): Promise<void> => {
+    try {
+      await Promise.all(
+        contentCachePrefixes(model).map((prefix) => ctx.cache.clear(prefix)),
+      );
+    } catch (error) {
+      logger.warn(`Cockpit: Failed to clear cached "${model}" reads`, error);
+    }
+  };
 
   return {
-    async getContentItem<T = unknown>(
-      options: ContentItemQueryOptions,
-    ): Promise<T | null> {
-      const {
-        model,
-        id,
-        locale = "default",
-        useAdminAccess,
-        queryParams = {},
-      } = options;
-      requireParam(model, "a model");
-      validatePathSegment(model, "model");
-      if (id !== undefined) validatePathSegment(id, "id");
-      const url = ctx.url.build(
-        `/content/item/${model}${id !== undefined ? `/${id}` : ""}`,
+    async getContentItem<T = unknown>({
+      model,
+      id,
+      locale,
+      fields,
+      populate,
+      useAdminAccess,
+      queryParams,
+    }: ContentItemQueryOptions): Promise<T | null> {
+      const path = `/content/item/${segment(model, "model")}`;
+      return get<T>(
+        ctx,
+        id === undefined ? path : `${path}/${segment(id, "id")}`,
         {
           locale,
-          queryParams,
+          useAdminAccess,
+          query: withTyped(queryParams, { fields, populate }),
         },
-      );
-      const key = `content:${model}:item:${id ?? "_"}:${locale}:${hashOpts({ useAdminAccess, queryParams })}`;
-      return ctx.cache.swr<T>(key, () =>
-        ctx.http.fetch<T>(url, buildFetchOptions(useAdminAccess)),
       );
     },
 
@@ -208,39 +181,12 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
       model: string,
       options: ContentListQueryOptions = {},
     ): Promise<CockpitListResponse<T> | null> {
-      requireParam(model, "a model");
-      validatePathSegment(model, "model");
-      const {
-        locale = "default",
-        limit,
-        skip,
-        sort,
-        filter,
-        fields,
-        populate,
-        useAdminAccess,
-        queryParams = {},
-      } = options;
-      const url = ctx.url.build(`/content/items/${model}`, {
-        locale,
-        queryParams: {
-          ...queryParams,
-          limit,
-          skip,
-          sort,
-          filter,
-          fields,
-          populate,
-        },
-      });
-      const key = `content:${model}:items:${locale}:${hashOpts({ limit, skip, sort, filter, fields, populate, useAdminAccess, queryParams })}`;
-      return ctx.cache.swr<CockpitListResponse<T>>(key, async () =>
-        normalizeListResponse<T>(
-          await ctx.http.fetch<T[] | CockpitListResponse<T>>(
-            url,
-            buildFetchOptions(useAdminAccess),
-          ),
-        ),
+      const { locale, useAdminAccess, queryParams, ...query } = options;
+      return get(
+        ctx,
+        `/content/items/${segment(model, "model")}`,
+        { locale, useAdminAccess, query: withTyped(queryParams, query) },
+        toList<T>,
       );
     },
 
@@ -248,37 +194,19 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
       model: string,
       options: UnchainedContentListQueryOptions = {},
     ): Promise<CockpitListResponse<T> | null> {
-      requireParam(model, "a model");
-      validatePathSegment(model, "model");
-      const {
-        locale = "default",
-        limit,
-        skip,
-        sort,
-        filter,
-        fields,
-        populate,
-        includeUnpublished,
-        queryParams = {},
-      } = options;
-      const url = ctx.url.build(`/unchained/content/items/${model}`, {
-        locale,
-        queryParams: {
-          ...queryParams,
-          limit,
-          skip,
-          sort,
-          filter,
-          fields,
-          populate,
-          ...(includeUnpublished && { includeUnpublished: 1 }),
-        },
-      });
-      // Admin endpoint that may include unpublished items — not cached.
-      return normalizeListResponse<T>(
-        await ctx.http.fetch<T[] | CockpitListResponse<T>>(url, {
+      const { locale, includeUnpublished, queryParams, ...query } = options;
+      delete query.useAdminAccess;
+      return get(
+        ctx,
+        `/unchained/content/items/${segment(model, "model")}`,
+        {
+          locale,
           useAdminAccess: true,
-        }),
+          cache: false,
+          links: false,
+          query: withTyped(queryParams, { ...query, includeUnpublished }),
+        },
+        toList<T>,
       );
     },
 
@@ -286,70 +214,52 @@ export function createContentMethods(ctx: MethodContext): ContentMethods {
       model: string,
       options: TreeQueryOptions = {},
     ): Promise<CockpitTreeNode<T>[] | null> {
-      requireParam(model, "a model");
-      validatePathSegment(model, "model");
-      const {
-        locale = "default",
-        parent,
-        filter,
-        fields,
-        populate,
-        useAdminAccess,
-        queryParams = {},
-      } = options;
-      const url = ctx.url.build(`/content/tree/${model}`, {
-        locale,
-        queryParams: {
-          ...queryParams,
-          parent,
-          filter: filter ?? {},
-          fields,
-          populate,
+      const { locale, useAdminAccess, queryParams, filter, ...query } = options;
+      return get<CockpitTreeNode<T>[]>(
+        ctx,
+        `/content/tree/${segment(model, "model")}`,
+        {
+          locale,
+          useAdminAccess,
+          query: {
+            filter: {},
+            ...withTyped(queryParams, { ...query, filter }),
+          },
         },
-      });
-      const key = `content:${model}:tree:${locale}:${hashOpts({ parent, filter, fields, populate, useAdminAccess, queryParams })}`;
-      return ctx.cache.swr<CockpitTreeNode<T>[]>(key, () =>
-        ctx.http.fetch<CockpitTreeNode<T>[]>(
-          url,
-          buildFetchOptions(useAdminAccess),
-        ),
       );
     },
 
-    async getAggregateModel<T = unknown>(
-      options: AggregateQueryOptions,
-    ): Promise<T[] | null> {
-      const { model, pipeline, locale = "default" } = options;
-      requireParam(model, "a model");
-      validatePathSegment(model, "model");
-      const url = ctx.url.build(`/content/aggregate/${model}`, {
+    async getAggregateModel<T = unknown>({
+      model,
+      pipeline,
+      locale,
+    }: AggregateQueryOptions): Promise<T[] | null> {
+      return get<T[]>(ctx, `/content/aggregate/${segment(model, "model")}`, {
         locale,
-        queryParams: { pipeline },
+        query: { pipeline },
       });
-      const key = `content:${model}:aggregate:${locale}:${hashOpts({ pipeline })}`;
-      return ctx.cache.swr<T[]>(key, () => ctx.http.fetch<T[]>(url));
     },
 
     async postContentItem<T = unknown>(
       model: string,
       item: Record<string, unknown>,
     ): Promise<T | null> {
-      requireParam(model, "a model");
-      validatePathSegment(model, "model");
-      const url = ctx.url.build(`/content/item/${model}`);
-      return ctx.http.post<T>(url, { data: item });
+      const url = ctx.url.build(`/content/item/${segment(model, "model")}`);
+      const result = await ctx.http.post<T>(url, { data: item });
+      await invalidate(model);
+      return result;
     },
 
     async deleteContentItem<T = unknown>(
       model: string,
       id: string,
     ): Promise<T | null> {
-      requireParam(model, "a model");
-      requireParam(id, "an id");
-      validatePathSegment(model, "model");
-      validatePathSegment(id, "id");
-      const url = ctx.url.build(`/content/item/${model}/${id}`);
-      return ctx.http.delete<T>(url);
+      const url = ctx.url.build(
+        `/content/item/${segment(model, "model")}/${segment(id, "id")}`,
+      );
+      const result = await ctx.http.delete<T>(url);
+      await invalidate(model);
+      return result;
     },
   };
 }

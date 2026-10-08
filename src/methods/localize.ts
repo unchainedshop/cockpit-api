@@ -2,8 +2,7 @@
  * Localization API methods (Lokalize addon)
  */
 
-import type { MethodContext } from "./content.ts";
-import { requireParam } from "../core/validation.ts";
+import { get, segment, type MethodContext } from "./context.ts";
 
 export interface LocalizeOptions {
   locale?: string;
@@ -21,15 +20,13 @@ export function createLocalizeMethods(ctx: MethodContext): LocalizeMethods {
   return {
     async localize<T = unknown>(
       projectName: string,
-      options: LocalizeOptions = {},
+      { locale, nested = false }: LocalizeOptions = {},
     ): Promise<T | null> {
-      requireParam(projectName, "projectName");
-      const { locale = "default", nested = false } = options;
-      const url = ctx.url.build(`/lokalize/project/${projectName}`, {
-        locale,
-        queryParams: { nested },
-      });
-      return ctx.http.fetch<T>(url);
+      return get<T>(
+        ctx,
+        `/lokalize/project/${segment(projectName, "projectName")}`,
+        { locale, query: { nested }, cache: false },
+      );
     },
   };
 }

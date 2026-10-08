@@ -1,24 +1,21 @@
 /**
- * Lightweight fetch client for Cockpit CMS
- *
- * Designed for edge/RSC environments where the full CockpitAPI
- * factory is too heavy. This client:
- * - Has no async initialization
- * - No caching (relies on platform caching)
- * - No response transformation
- * - Minimal memory footprint
+ * Lightweight fetch client for edge/RSC environments: no async init, no
+ * caching (relies on platform caching), no response transformation.
+ * Edge-safe: imports nothing but core/url.ts and core/errors.ts at runtime.
  */
 
-import { createLocaleNormalizer } from "../core/locale.ts";
+import {
+  createUrlBuilder,
+  DEFAULT_TIMEOUT_MS,
+  validatePathSegment,
+} from "../core/url.ts";
+import { CockpitHttpError, requestError } from "../core/errors.ts";
 import type { CockpitPage } from "../methods/pages.ts";
 import type {
   CockpitContentItem,
   CockpitListResponse,
 } from "../methods/content.ts";
 
-/**
- * Request cache mode for fetch requests
- */
 export type FetchCacheMode =
   | "default"
   | "force-cache"
@@ -27,127 +24,85 @@ export type FetchCacheMode =
   | "only-if-cached"
   | "reload";
 
-/**
- * Options for creating a lightweight fetch client
- */
 export interface FetchClientOptions {
-  /** Cockpit CMS endpoint URL */
+  /** Cockpit endpoint URL, only its origin is used (env: COCKPIT_GRAPHQL_ENDPOINT) */
   endpoint?: string;
-  /** Tenant ID for multi-tenant setups */
+  /** Tenant (`/^[a-zA-Z0-9_-]+$/`): requests go to `/:<tenant>/api/...` */
   tenant?: string | null;
-  /**
-   * Default language that maps to Cockpit's "default" locale.
-   * When a request uses this language, it will be sent as "default" to Cockpit.
-   * @default "de"
-   */
-  defaultLanguage?: string;
-  /** Request cache mode (default: "no-store") */
+  /** Language sent as Cockpit's "default" locale (default: null, no mapping) */
+  defaultLanguage?: string | null;
+  /** fetch cache mode (default: "no-store") */
   cache?: FetchCacheMode;
-  /** Additional request headers */
+  /** Extra request headers; like `apiKey`, they disable following redirects */
   headers?: Record<string, string>;
-  /** API key for authenticated requests */
+  /** Sent as `api-Key` header. Server-side only: never ship it to browsers */
   apiKey?: string;
+  /** Request timeout in ms, `0` disables (default: 15000) */
+  timeout?: number;
 }
 
 /**
- * Query parameters for page/content requests
+ * Query parameters (same encoding as the main client). The library-controlled
+ * `locale`, `populate` and `route` (`pageByRoute`) win over extra keys.
  */
 export interface PageFetchParams {
-  /** Locale for the request (the configured defaultLanguage maps to "default") */
-  locale?: string;
-  /** Populate depth for linked content */
-  populate?: number;
-  /** Additional query parameters */
-  [key: string]: string | number | boolean | undefined;
+  locale?: string | undefined;
+  populate?: number | undefined;
+  [key: string]: unknown;
 }
 
-/**
- * Lightweight fetch client interface
- */
 export interface FetchClient {
-  /** Fetch a page by route */
   pageByRoute<T = CockpitPage>(
     route: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
-  /** Fetch pages list. Always returns { data, meta? } or null. */
   pages<T = CockpitPage>(
     params?: PageFetchParams,
   ): Promise<CockpitListResponse<T> | null>;
-  /** Fetch a page by ID */
   pageById<T = CockpitPage>(
     id: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
-  /** Fetch content items. Always returns { data, meta? } or null. */
   getContentItems<T = CockpitContentItem>(
     model: string,
     params?: PageFetchParams,
   ): Promise<CockpitListResponse<T> | null>;
-  /** Fetch a single content item */
   getContentItem<T = unknown>(
     model: string,
     id?: string,
     params?: PageFetchParams,
   ): Promise<T | null>;
-  /** Raw fetch for custom paths */
-  fetchRaw<T = unknown>(
-    path: string,
-    params?: Record<string, string | number | boolean | undefined>,
-  ): Promise<T>;
+  /**
+   * JSON from a path below the API base (`/api` or `/:tenant/api`). `path`
+   * starts with `/`; dot segments, `%`, `\`, `?`, `#`, `//` and control
+   * characters are rejected. Pass query parameters via `params`.
+   */
+  fetchRaw<T = unknown>(path: string, params?: PageFetchParams): Promise<T>;
 }
 
-/**
- * Build the API base URL for the given endpoint and tenant
- */
-function buildApiBaseUrl(endpoint: string, tenant?: string | null): string {
-  const url = new URL(endpoint);
-  const basePath = tenant ? `/:${tenant}/api` : "/api";
-  return `${url.origin}${basePath}`;
+const toList = <T>(
+  result: T[] | CockpitListResponse<T> | null,
+): CockpitListResponse<T> | null =>
+  Array.isArray(result) ? { data: result } : result;
+
+/** Validated, encoded path segment */
+function segment(value: string, name: string): string {
+  validatePathSegment(value, name);
+  return encodeURIComponent(value);
 }
 
-/**
- * Build query string from params object, filtering undefined values
- */
-function buildQueryString(
-  params: Record<string, string | number | boolean | undefined>,
-): string {
-  const filtered: [string, string][] = Object.entries(params)
-    .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => [key, String(value)]);
-  return new URLSearchParams(filtered).toString();
-}
-
-/**
- * Creates a lightweight fetch client for Cockpit CMS
- *
- * @example
- * ```typescript
- * import { createFetchClient } from "@unchainedshop/cockpit-api/fetch";
- *
- * const cockpit = createFetchClient({
- *   endpoint: process.env.NEXT_PUBLIC_COCKPIT_ENDPOINT,
- *   tenant: "mytenant",
- * });
- *
- * // Fetch a page by route
- * const page = await cockpit.pageByRoute("/about", { locale: "en" });
- *
- * // Fetch content items
- * const items = await cockpit.getContentItems("news", { locale: "de", limit: 10 });
- * ```
- */
 export function createFetchClient(
   options: FetchClientOptions = {},
 ): FetchClient {
   const {
-    endpoint = process.env["COCKPIT_GRAPHQL_ENDPOINT"] ??
-      process.env["NEXT_PUBLIC_COCKPIT_ENDPOINT"],
-    tenant = null,
-    defaultLanguage = "de",
+    endpoint = typeof process === "undefined"
+      ? undefined
+      : process.env["COCKPIT_GRAPHQL_ENDPOINT"],
+    tenant,
+    defaultLanguage = null,
     cache = "no-store",
-    headers = {},
     apiKey,
+    timeout = DEFAULT_TIMEOUT_MS,
   } = options;
 
   if (endpoint === undefined || endpoint === "") {
@@ -155,150 +110,79 @@ export function createFetchClient(
       "Cockpit: endpoint is required (provide via options or COCKPIT_GRAPHQL_ENDPOINT env var)",
     );
   }
+  if (tenant) validatePathSegment(tenant, "tenant");
 
-  const baseUrl = buildApiBaseUrl(endpoint, tenant);
-  const normalizeLocale = createLocaleNormalizer(defaultLanguage);
-
-  const requestHeaders: Record<string, string> = { ...headers };
-  if (apiKey !== undefined) {
-    requestHeaders["api-Key"] = apiKey;
+  const urls = createUrlBuilder({
+    endpoint: new URL(new URL(endpoint).origin),
+    defaultLanguage,
+    ...(tenant ? { tenant } : {}),
+  });
+  const headers = {
+    ...options.headers,
+    ...(apiKey !== undefined && { "api-Key": apiKey }),
+  };
+  const init: RequestInit = { cache };
+  if (Object.keys(headers).length > 0) {
+    init.headers = headers;
+    // Never let the runtime forward credentials to another origin
+    init.redirect = "error";
   }
 
-  /**
-   * Fetch raw JSON from a Cockpit API path
-   */
-  async function fetchRaw<T = unknown>(
+  async function request<T>(
     path: string,
-    params: Record<string, string | number | boolean | undefined> = {},
+    { locale, ...queryParams }: PageFetchParams = {},
   ): Promise<T> {
-    const queryString = buildQueryString(params);
-    const url = queryString
-      ? `${baseUrl}${path}?${queryString}`
-      : `${baseUrl}${path}`;
-
-    const fetchInit: RequestInit = { cache };
-    if (Object.keys(requestHeaders).length > 0) {
-      fetchInit.headers = requestHeaders;
-    }
-    const response = await fetch(url, fetchInit);
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null as T;
+    const url = urls.build(path, {
+      queryParams,
+      ...(locale !== undefined && { locale }),
+    });
+    try {
+      const response = await fetch(url, {
+        ...init,
+        ...(timeout > 0 && { signal: AbortSignal.timeout(timeout) }),
+      });
+      if (response.status === 404) return null as T;
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new CockpitHttpError(response.status, url, body);
       }
-      throw new Error(
-        `Cockpit: Error fetching ${url} (${String(response.status)})`,
+      return (await response.json()) as T;
+    } catch (err) {
+      throw requestError(
+        err,
+        url.pathname,
+        timeout,
+        init.headers !== undefined,
       );
     }
-
-    return response.json() as Promise<T>;
   }
 
   return {
-    /**
-     * Fetch a page by route
-     */
-    async pageByRoute<T = CockpitPage>(
-      route: string,
-      params: PageFetchParams = {},
-    ): Promise<T | null> {
-      const { locale, populate, ...rest } = params;
-      return fetchRaw<T>("/pages/page", {
-        route,
-        locale: normalizeLocale(locale),
-        populate,
-        ...rest,
-      });
-    },
+    pageByRoute: async (route, { populate, ...params } = {}) =>
+      request("/pages/page", { ...params, route, populate }),
 
-    /**
-     * Fetch pages list
-     */
-    async pages<T = CockpitPage>(
-      params: PageFetchParams = {},
-    ): Promise<CockpitListResponse<T> | null> {
-      const { locale, ...rest } = params;
-      const result = await fetchRaw<T[] | CockpitListResponse<T> | null>(
-        "/pages/pages",
-        {
-          locale: normalizeLocale(locale),
-          ...rest,
-        },
-      );
+    pages: async (params) => toList(await request("/pages/pages", params)),
 
-      // Normalize response to always return { data, meta? }
-      if (result === null) {
-        return null;
-      }
-      if (Array.isArray(result)) {
-        return { data: result };
-      }
-      return result;
-    },
+    pageById: async (id, { populate, ...params } = {}) =>
+      request(`/pages/page/${segment(id, "id")}`, { ...params, populate }),
 
-    /**
-     * Fetch a page by ID
-     */
-    async pageById<T = CockpitPage>(
-      id: string,
-      params: PageFetchParams = {},
-    ): Promise<T | null> {
-      const { locale, populate, ...rest } = params;
-      return fetchRaw<T>(`/pages/page/${id}`, {
-        locale: normalizeLocale(locale),
-        populate,
-        ...rest,
-      });
-    },
+    getContentItems: async (model, params) =>
+      toList(
+        await request(`/content/items/${segment(model, "model")}`, params),
+      ),
 
-    /**
-     * Fetch content items
-     */
-    async getContentItems<T = CockpitContentItem>(
-      model: string,
-      params: PageFetchParams = {},
-    ): Promise<CockpitListResponse<T> | null> {
-      const { locale, ...rest } = params;
-      const result = await fetchRaw<T[] | CockpitListResponse<T> | null>(
-        `/content/items/${model}`,
-        {
-          locale: normalizeLocale(locale),
-          ...rest,
-        },
-      );
-
-      // Normalize response to always return { data, meta? }
-      if (result === null) {
-        return null;
-      }
-      if (Array.isArray(result)) {
-        return { data: result };
-      }
-      return result;
-    },
-
-    /**
-     * Fetch a single content item
-     */
-    async getContentItem<T = unknown>(
+    getContentItem: async <T>(
       model: string,
       id?: string,
-      params: PageFetchParams = {},
-    ): Promise<T | null> {
-      const { locale, ...rest } = params;
-      const path =
-        id !== undefined
-          ? `/content/item/${model}/${id}`
-          : `/content/item/${model}`;
-      return fetchRaw<T>(path, {
-        locale: normalizeLocale(locale),
-        ...rest,
-      });
+      params?: PageFetchParams,
+    ): Promise<T | null> => {
+      const item = `/content/item/${segment(model, "model")}`;
+      return request(
+        id === undefined ? item : `${item}/${segment(id, "id")}`,
+        params,
+      );
     },
 
-    /**
-     * Raw fetch for custom paths
-     */
-    fetchRaw: fetchRaw,
+    fetchRaw: async (path, params) => request(path, params),
   };
 }

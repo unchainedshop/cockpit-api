@@ -1,126 +1,34 @@
 /**
- * Configuration management for Cockpit API client
+ * Configuration of the Cockpit API client (options with env var fallbacks)
  */
 
+import { createHash } from "node:crypto";
+import { warnOnce } from "../cockpit-logger.ts";
 import { resolveApiKey } from "../utils/tenant.ts";
+import { DEFAULT_TIMEOUT_MS } from "./url.ts";
 import type { CacheOptions } from "./cache.ts";
 
 export interface CockpitAPIOptions {
-  /** Cockpit CMS endpoint URL (falls back to COCKPIT_GRAPHQL_ENDPOINT env var) */
+  /** Cockpit endpoint URL (env: COCKPIT_GRAPHQL_ENDPOINT) */
   endpoint?: string;
-  /** Tenant name for multi-tenant setups */
+  /** Tenant for multi-tenant setups (requests go to `/:<tenant>/api/...`) */
   tenant?: string;
-  /** API key (falls back to COCKPIT_SECRET env var) */
+  /** API key (env: COCKPIT_SECRET_<TENANT>, or COCKPIT_SECRET without a tenant) */
   apiKey?: string;
-  /** Use admin access with API key */
+  /** Send the API key with every request (overridable per request) */
   useAdminAccess?: boolean;
-  /**
-   * Default language that maps to Cockpit's "default" locale.
-   * When a request uses this language, it will be sent as "default" to Cockpit.
-   */
+  /** Language sent as Cockpit's "default" locale (default: null, no mapping) */
   defaultLanguage?: string | null;
-  /**
-   * Cache configuration
-   *
-   * - Set to `false` to disable caching entirely
-   * - Set to an object to configure cache behavior
-   * - Omit to use default LRU cache with env var fallbacks
-   *
-   * @example Disable cache
-   * ```typescript
-   * const client = await CockpitAPI({
-   *   endpoint: 'https://cms.example.com',
-   *   cache: false
-   * });
-   * ```
-   *
-   * @example Custom cache options
-   * ```typescript
-   * const client = await CockpitAPI({
-   *   endpoint: 'https://cms.example.com',
-   *   cache: { max: 200, ttl: 300000 }
-   * });
-   * ```
-   *
-   * @example Redis store
-   * ```typescript
-   * import { createClient } from 'redis';
-   *
-   * const redisClient = createClient({ url: process.env.REDIS_URL });
-   * await redisClient.connect();
-   *
-   * const client = await CockpitAPI({
-   *   endpoint: 'https://cms.example.com',
-   *   cache: {
-   *     store: {
-   *       async get(key) {
-   *         const val = await redisClient.get(key);
-   *         return val ? JSON.parse(val) : undefined;
-   *       },
-   *       async set(key, value) {
-   *         await redisClient.set(key, JSON.stringify(value), { EX: 100 });
-   *       },
-   *       async clear(pattern) {
-   *         if (pattern) {
-   *           const keys = await redisClient.keys(\`\${pattern}*\`);
-   *           if (keys.length > 0) await redisClient.del(keys);
-   *         } else {
-   *           await redisClient.flushDb();
-   *         }
-   *       }
-   *     }
-   *   }
-   * });
-   * ```
-   */
+  /** `false` disables caching; see README for custom stores (Redis, Keyv, ...) */
   cache?: false | CacheOptions;
-  /**
-   * Public URL for asset path rewriting.
-   * When using an internal/Docker endpoint (e.g. http://cms:80/api/gql), asset paths
-   * would contain the internal hostname. Set this to the public-facing URL so that
-   * asset paths use the correct origin in responses.
-   *
-   * Falls back to COCKPIT_PUBLIC_URL env var. When omitted, uses endpoint.origin.
-   *
-   * @example
-   * ```typescript
-   * const client = await CockpitAPI({
-   *   endpoint: 'http://cms-internal:80/api/gql',  // internal
-   *   publicUrl: 'https://cms.example.com',         // public-facing
-   * });
-   * ```
-   */
+  /** Public origin for asset URLs when the endpoint is internal (env: COCKPIT_PUBLIC_URL) */
   publicUrl?: string;
-  /**
-   * Emit asset paths as host-relative (`/storage/uploads/…`) instead of
-   * absolute. Useful when the fetch endpoint differs from the browser-facing
-   * host (e.g. the client talks to Cockpit over an internal Docker hostname
-   * while the browser loads assets from a public URL): emit relative paths and
-   * let the consuming app prepend its own public origin.
-   *
-   * When `true`, `publicUrl`/`endpoint.origin` are ignored for asset rewriting
-   * and the transformer leaves paths host-relative. Falls back to the
-   * `COCKPIT_RELATIVE_ASSET_PATHS=true` env var.
-   *
-   * @default false
-   * @example
-   * ```typescript
-   * const client = await CockpitAPI({
-   *   endpoint: 'http://cms-internal:80/api/gql', // internal fetch host
-   *   relativeAssetPaths: true,                   // -> "path":"/storage/uploads/x.jpg"
-   * });
-   * ```
-   */
+  /** Emit host-relative asset paths (env: COCKPIT_RELATIVE_ASSET_PATHS=true) */
   relativeAssetPaths?: boolean;
-  /**
-   * Resolve `pages://id` links in responses to their page routes.
-   * The route map is cached with stale-while-revalidate like other reads and
-   * looked up per response, so long-lived clients follow moved pages within
-   * the fresh window. With `cache: false` it is fetched once, at creation.
-   * When false (default), links are left as-is and no route map is fetched.
-   * @default false
-   */
-  preloadRoutes?: boolean;
+  /** Resolve `pages://id` links per response with the locale's route map (default: false) */
+  resolvePageLinks?: boolean;
+  /** Request timeout in ms, `0` disables (env: COCKPIT_TIMEOUT, default: 15000) */
+  timeout?: number;
 }
 
 export interface CockpitConfig {
@@ -131,56 +39,126 @@ export interface CockpitConfig {
   readonly defaultLanguage: string | null;
   readonly publicUrl?: string;
   readonly relativeAssetPaths: boolean;
+  readonly resolvePageLinks: boolean;
+  /** Request timeout in ms; `0` disables it */
+  readonly timeout: number;
+  readonly cache: false | CacheOptions;
+  /**
+   * `cockpit-api:<endpoint>:<tenant>:<access scope>:`, so clients for other
+   * endpoints, tenants or keys sharing one store never see each other's entries
+   */
   readonly cachePrefix: string;
 }
 
-/** Valid tenant format: alphanumeric, hyphens, underscores only */
-const VALID_TENANT_PATTERN = /^[a-z0-9_-]+$/i;
+/** Env var value, `undefined` when unset or blank */
+export function env(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value === "" ? undefined : value;
+}
+
+/** Numeric env var; throws when set but not a number */
+export function envNumber(name: string): number | undefined {
+  const value = env(name);
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`Cockpit: Invalid ${name} (expected a number)`);
+  }
+  return parsed;
+}
 
 /**
- * Creates an immutable configuration object for the Cockpit API client
+ * Cache scope of the effective access mode: `"public"` without api-Key,
+ * otherwise `"admin-<short sha256 of the key>"` (keys with different
+ * permissions get separate entries; the raw key never appears in a key).
  */
+export function accessCacheScope(
+  config: Pick<CockpitConfig, "apiKey" | "useAdminAccess">,
+  useAdminAccess?: boolean,
+): string {
+  if (!(useAdminAccess ?? config.useAdminAccess)) return "public";
+  // Admin access without a key throws before any request: never holds data
+  if (!config.apiKey) return "admin";
+  const digest = createHash("sha256").update(config.apiKey).digest("hex");
+  return `admin-${digest.slice(0, 12)}`;
+}
+
+const VALID_TENANT = /^[a-z0-9_-]+$/i;
+
 export function createConfig(options: CockpitAPIOptions = {}): CockpitConfig {
-  const endpointStr =
-    options.endpoint ?? process.env["COCKPIT_GRAPHQL_ENDPOINT"];
+  const endpointStr = options.endpoint ?? env("COCKPIT_GRAPHQL_ENDPOINT");
   if (endpointStr === undefined || endpointStr === "") {
     throw new Error(
       "Cockpit: endpoint is required (provide via options or COCKPIT_GRAPHQL_ENDPOINT env var)",
     );
   }
-
-  // Normalize empty string tenant to undefined
-  const tenant =
-    options.tenant === undefined || options.tenant === ""
-      ? undefined
-      : options.tenant;
-
-  // Validate tenant format to prevent path traversal
-  if (tenant && !VALID_TENANT_PATTERN.test(tenant)) {
+  const tenant = options.tenant === "" ? undefined : options.tenant;
+  if (tenant !== undefined && !VALID_TENANT.test(tenant)) {
     throw new Error(
       "Cockpit: Invalid tenant format (only alphanumeric, hyphens, and underscores allowed)",
     );
   }
 
-  const endpoint = new URL(endpointStr);
-  const apiKey = resolveApiKey(tenant, options);
-  const publicUrl =
-    options.publicUrl ?? process.env["COCKPIT_PUBLIC_URL"] ?? undefined;
-  const relativeAssetPaths =
-    options.relativeAssetPaths ??
-    process.env["COCKPIT_RELATIVE_ASSET_PATHS"] === "true";
+  const timeout =
+    options.timeout ?? envNumber("COCKPIT_TIMEOUT") ?? DEFAULT_TIMEOUT_MS;
+  if (!Number.isFinite(timeout) || timeout < 0) {
+    throw new Error(
+      "Cockpit: Invalid timeout (expected a non-negative number of milliseconds, 0 to disable)",
+    );
+  }
 
-  // Build config object with all properties before freezing
-  const config: CockpitConfig = Object.freeze({
-    endpoint,
-    useAdminAccess: options.useAdminAccess ?? false,
+  // Removed v2 options are ignored: tell JS callers once
+  if ("preloadRoutes" in options) {
+    warnOnce(
+      "preloadRoutes",
+      "Cockpit: preloadRoutes was removed in v3 and is ignored; use resolvePageLinks",
+    );
+  }
+  for (const key of ["ttl", "maxSize", "memoryLayer"]) {
+    if (options.cache && key in options.cache) {
+      warnOnce(
+        `cache.${key}`,
+        `Cockpit: cache.${key} was removed in v3 and is ignored`,
+      );
+    }
+  }
+
+  const apiKey = resolveApiKey(tenant, options);
+  // Without trailing slashes: base URLs are joined with absolute paths
+  const publicUrl = (options.publicUrl ?? env("COCKPIT_PUBLIC_URL"))?.replace(
+    /\/+$/,
+    "",
+  );
+  const useAdminAccess = options.useAdminAccess ?? false;
+  const scope = accessCacheScope({
+    useAdminAccess,
+    ...(apiKey !== undefined && { apiKey }),
+  });
+  // `max` only sizes the built-in store
+  const max =
+    options.cache === false || options.cache?.store !== undefined
+      ? undefined
+      : (options.cache?.max ?? envNumber("COCKPIT_CACHE_MAX"));
+
+  return Object.freeze({
+    endpoint: new URL(endpointStr),
+    useAdminAccess,
     defaultLanguage: options.defaultLanguage ?? null,
-    relativeAssetPaths,
-    cachePrefix: `cockpit-api:${endpointStr}:${tenant ?? "default"}:`,
-    ...(tenant && { tenant }),
+    relativeAssetPaths:
+      options.relativeAssetPaths ??
+      env("COCKPIT_RELATIVE_ASSET_PATHS") === "true",
+    resolvePageLinks: options.resolvePageLinks ?? false,
+    timeout,
+    cache:
+      options.cache === false
+        ? false
+        : {
+            ...options.cache,
+            ...(max !== undefined && { max }),
+          },
+    cachePrefix: `cockpit-api:${endpointStr}:${tenant ?? "default"}:${scope}:`,
+    ...(tenant !== undefined && { tenant }),
     ...(apiKey !== undefined && { apiKey }),
     ...(publicUrl !== undefined && { publicUrl }),
   });
-
-  return config;
 }

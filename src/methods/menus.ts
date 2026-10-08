@@ -2,8 +2,8 @@
  * Menu API methods
  */
 
-import type { MethodContext } from "./content.ts";
 import type { CockpitAsset } from "./assets.ts";
+import { get, legacyLocale, segment, type MethodContext } from "./context.ts";
 
 export interface MenuQueryOptions {
   inactive?: boolean;
@@ -39,42 +39,34 @@ export interface CockpitMenu {
 }
 
 export interface MenuMethods {
-  pagesMenus<T = CockpitMenu>(
-    options?: MenuQueryOptions | string,
-  ): Promise<T[] | null>;
+  pagesMenus<T = CockpitMenu>(options?: MenuQueryOptions): Promise<T[] | null>;
   pagesMenu<T = CockpitMenu>(
     name: string,
-    options?: MenuQueryOptions | string,
+    options?: MenuQueryOptions,
   ): Promise<T | null>;
 }
 
 export function createMenuMethods(ctx: MethodContext): MenuMethods {
   return {
     async pagesMenus<T = CockpitMenu>(
-      options: MenuQueryOptions | string = "default",
+      options: MenuQueryOptions = {},
     ): Promise<T[] | null> {
-      const opts = typeof options === "string" ? { locale: options } : options;
-      const { locale = "default", inactive } = opts;
-      const url = ctx.url.build("/pages/menus", {
-        locale,
-        queryParams: { inactive },
-      });
-      const key = `pages:menus:${locale}:${inactive ? "1" : "0"}`;
-      return ctx.cache.swr<T[]>(key, () => ctx.http.fetch<T[]>(url));
+      const { locale, inactive } = legacyLocale(options, "pagesMenus(locale)");
+      return get<T[]>(ctx, "/pages/menus", { locale, query: { inactive } });
     },
 
     async pagesMenu<T = CockpitMenu>(
       name: string,
-      options: MenuQueryOptions | string = "default",
+      options: MenuQueryOptions = {},
     ): Promise<T | null> {
-      const opts = typeof options === "string" ? { locale: options } : options;
-      const { locale = "default", inactive } = opts;
-      const url = ctx.url.build(`/pages/menu/${name}`, {
+      const { locale, inactive } = legacyLocale(
+        options,
+        "pagesMenu(name, locale)",
+      );
+      return get<T>(ctx, `/pages/menu/${segment(name, "menu name")}`, {
         locale,
-        queryParams: { inactive },
+        query: { inactive },
       });
-      const key = `pages:menu:${name}:${locale}:${inactive ? "1" : "0"}`;
-      return ctx.cache.swr<T>(key, () => ctx.http.fetch<T>(url));
     },
   };
 }

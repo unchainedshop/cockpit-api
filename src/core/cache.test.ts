@@ -1,558 +1,502 @@
-import { describe, it } from "node:test";
+import { describe, it, mock, type TestContext } from "node:test";
 import assert from "node:assert";
 import {
   createCacheManager,
+  createLRUCacheStore,
   createNoOpCacheManager,
+  DEFAULT_SWR_FRESH_MS,
+  DEFAULT_SWR_STALE_MS,
+  hashOpts,
   type AsyncCacheStore,
 } from "./cache.ts";
+import { logger } from "../cockpit-logger.ts";
+import { CockpitHttpError, createHttpClient } from "./http.ts";
+import { createConfig } from "./config.ts";
 
-describe("createCacheManager", () => {
-  it("creates cache with default options when none provided", async () => {
-    // Test with no options object at all
-    const cache = createCacheManager("test:");
-    await cache.set("key", "value");
-    assert.strictEqual(await cache.get("key"), "value");
-    await cache.clear();
-    assert.strictEqual(await cache.get("key"), undefined);
-  });
+const T0 = 1_000_000;
+const flush = () => new Promise<void>((r) => setImmediate(r));
 
-  it("stores and retrieves values with prefix (async)", async () => {
-    const cache = createCacheManager("test:prefix:");
-    await cache.set("key1", { data: "value1" });
+/** Plain Map-backed store (shares references) so tests can inspect raw entries */
+const createMapStore = () => {
+  const map = new Map<string, unknown>();
+  const clears: (string | undefined)[] = [];
+  const store: AsyncCacheStore = {
+    get: async (key) => map.get(key),
+    set: async (key, value) => {
+      map.set(key, value);
+    },
+    clear: async (pattern) => {
+      clears.push(pattern);
+      for (const key of map.keys()) {
+        if (pattern === undefined || key.startsWith(pattern)) map.delete(key);
+      }
+    },
+  };
+  return { map, store, clears };
+};
 
-    const result = (await cache.get("key1")) as { data: string } | undefined;
-    assert.deepStrictEqual(result, { data: "value1" });
-  });
+/** Fetcher whose pending promise is settled manually from the test */
+const deferredFetcher = <T>() => {
+  const state = { calls: 0, resolve: (_v: T) => {}, reject: (_e: unknown) => {} };
+  const fetcher = () => {
+    state.calls += 1;
+    return new Promise<T>((resolve, reject) => {
+      state.resolve = resolve;
+      state.reject = reject;
+    });
+  };
+  return { state, fetcher };
+};
 
-  it("returns undefined for missing keys (async)", async () => {
-    const cache = createCacheManager("test:prefix:");
-    const result = await cache.get("nonexistent");
-    assert.strictEqual(result, undefined);
-  });
+const counting = <T>(produce: (calls: number) => T) => {
+  let calls = 0;
+  const fetcher = async () => produce(++calls);
+  return { fetcher, calls: () => calls };
+};
 
-  it("clears all entries without pattern (async)", async () => {
-    const cache = createCacheManager("test:prefix:");
-    await cache.set("key1", "value1");
-    await cache.set("key2", "value2");
-    await cache.set("key3", "value3");
+const staleEnvelope = (data: unknown, staleFor = 60_000) => ({
+  data,
+  freshUntil: T0 - 1000,
+  staleUntil: T0 + staleFor,
+});
 
-    // Call clear with undefined pattern explicitly to cover that branch
-    await cache.clear(undefined);
+describe("createCacheManager get/set/clear", () => {
+  for (const kind of ["built-in", "custom"] as const) {
+    const make = (prefix: string) =>
+      kind === "built-in" ? createCacheManager(prefix) : createCacheManager(prefix, { store: createMapStore().store });
 
-    assert.strictEqual(await cache.get("key1"), undefined);
-    assert.strictEqual(await cache.get("key2"), undefined);
-    assert.strictEqual(await cache.get("key3"), undefined);
-  });
+    it(`stores, prefixes and clears by pattern (${kind} store)`, async () => {
+      const cache = make("test:");
+      await cache.set("ROUTE_1", "a");
+      await cache.set("ROUTE_2", { v: "b" });
+      await cache.set("OTHER", "c");
+      assert.deepStrictEqual(await cache.get("ROUTE_2"), { v: "b" });
+      assert.strictEqual(await cache.get("missing"), undefined);
 
-  it("clears entries matching pattern (async)", async () => {
-    const cache = createCacheManager("test:prefix:");
-    await cache.set("ROUTE_key1", "value1");
-    await cache.set("ROUTE_key2", "value2");
-    await cache.set("OTHER_key3", "value3");
+      await cache.clear("NONE");
+      await cache.clear("ROUTE");
+      assert.strictEqual(await cache.get("ROUTE_1"), undefined);
+      assert.strictEqual(await cache.get("OTHER"), "c");
+      await cache.clear();
+      assert.strictEqual(await cache.get("OTHER"), undefined);
+    });
+  }
 
-    await cache.clear("ROUTE");
-
-    assert.strictEqual(await cache.get("ROUTE_key1"), undefined);
-    assert.strictEqual(await cache.get("ROUTE_key2"), undefined);
-    assert.strictEqual(await cache.get("OTHER_key3"), "value3");
-  });
-
-  it("clears with pattern that matches no entries", async () => {
-    const cache = createCacheManager("test:prefix:");
-    await cache.set("key1", "value1");
-    await cache.set("key2", "value2");
-
-    // Clear with pattern that doesn't match anything
-    await cache.clear("NONEXISTENT");
-
-    // All entries should still exist
-    assert.strictEqual(await cache.get("key1"), "value1");
-    assert.strictEqual(await cache.get("key2"), "value2");
-  });
-
-  it("clears empty cache without error", async () => {
-    const cache = createCacheManager("test:prefix:");
-
-    // Clear empty cache with no pattern
-    await cache.clear();
-
-    // Clear empty cache with pattern
-    await cache.clear("PATTERN");
-
-    assert.ok(true); // Should not throw
-  });
-
-  it("uses custom max and ttl options with default LRU store", async () => {
-    const cache = createCacheManager("test:", { max: 2, ttl: 1000 });
-    await cache.set("key1", "value1");
-    await cache.set("key2", "value2");
-    await cache.set("key3", "value3"); // Should evict key1
-
-    // key3 should exist, key1 may have been evicted
-    assert.strictEqual(await cache.get("key3"), "value3");
-  });
-
-  it("clears all entries using default LRU store clear method", async () => {
-    // This test specifically ensures the LRU cache.clear() call is executed
-    const cache = createCacheManager("test:lru:", { max: 10, ttl: 60000 });
+  it("passes prefixed keys and patterns to a custom store", async () => {
+    const { map, store, clears } = createMapStore();
+    const cache = createCacheManager("prefix:", { store, max: 1 });
     await cache.set("a", 1);
     await cache.set("b", 2);
-    await cache.set("c", 3);
-    await cache.set("d", 4);
-    await cache.set("e", 5);
-
-    // Verify entries exist
-    assert.strictEqual(await cache.get("a"), 1);
-    assert.strictEqual(await cache.get("c"), 3);
-
-    // Clear without pattern - should trigger LRU cache.clear()
+    assert.deepStrictEqual([...map.keys()], ["prefix:a", "prefix:b"], "max is ignored with a custom store");
     await cache.clear();
-
-    // Verify all entries are gone
-    assert.strictEqual(await cache.get("a"), undefined);
-    assert.strictEqual(await cache.get("b"), undefined);
-    assert.strictEqual(await cache.get("c"), undefined);
-    assert.strictEqual(await cache.get("d"), undefined);
-    assert.strictEqual(await cache.get("e"), undefined);
-  });
-
-  it("clears default LRU cache by explicitly calling with no args", async () => {
-    const cache = createCacheManager("test:explicit:");
-    await cache.set("x", "value-x");
-    await cache.set("y", "value-y");
-
-    // Explicitly call with no arguments to ensure branch coverage
-    await cache.clear();
-
-    assert.strictEqual(await cache.get("x"), undefined);
-    assert.strictEqual(await cache.get("y"), undefined);
-  });
-
-  it("works with custom async store", async () => {
-    // Create a simple in-memory async store
-    const store = new Map<string, unknown>();
-    const customStore: AsyncCacheStore = {
-      async get(key: string) {
-        return store.get(key);
-      },
-      async set(key: string, value: unknown) {
-        store.set(key, value);
-      },
-      async clear(pattern?: string) {
-        if (pattern) {
-          for (const key of store.keys()) {
-            if (key.startsWith(pattern)) {
-              store.delete(key);
-            }
-          }
-        } else {
-          store.clear();
-        }
-      },
-    };
-
-    const cache = createCacheManager("custom:", { store: customStore });
-
-    await cache.set("test", { foo: "bar" });
-    const result = await cache.get("test");
-    assert.deepStrictEqual(result, { foo: "bar" });
-
-    // Verify it's using the custom store (check the prefixed key)
-    assert.ok(store.has("custom:test"));
-  });
-
-  it("custom store ignores max and ttl options", async () => {
-    const store = new Map<string, unknown>();
-    const customStore: AsyncCacheStore = {
-      async get(key: string) {
-        return store.get(key);
-      },
-      async set(key: string, value: unknown) {
-        store.set(key, value);
-      },
-      async clear() {
-        store.clear();
-      },
-    };
-
-    // These options should be ignored when custom store is provided
-    const cache = createCacheManager("test:", {
-      max: 1,
-      ttl: 100,
-      store: customStore,
-    });
-
-    // Should be able to store more than max=1 because custom store is used
-    await cache.set("key1", "value1");
-    await cache.set("key2", "value2");
-    await cache.set("key3", "value3");
-
-    assert.strictEqual(await cache.get("key1"), "value1");
-    assert.strictEqual(await cache.get("key2"), "value2");
-    assert.strictEqual(await cache.get("key3"), "value3");
-  });
-
-  it("custom store clear handles pattern correctly", async () => {
-    const store = new Map<string, unknown>();
-    let lastClearPattern: string | undefined;
-
-    const customStore: AsyncCacheStore = {
-      async get(key: string) {
-        return store.get(key);
-      },
-      async set(key: string, value: unknown) {
-        store.set(key, value);
-      },
-      async clear(pattern?: string) {
-        lastClearPattern = pattern;
-        if (pattern) {
-          for (const key of store.keys()) {
-            if (key.startsWith(pattern)) {
-              store.delete(key);
-            }
-          }
-        } else {
-          store.clear();
-        }
-      },
-    };
-
-    const cache = createCacheManager("prefix:", { store: customStore });
-
-    // Test clear with no pattern (should pass "prefix:" to store)
-    await cache.clear();
-    assert.strictEqual(lastClearPattern, "prefix:");
-
-    // Reset and test clear with pattern (should pass "prefix:ROUTE" to store)
-    await cache.set("ROUTE_1", "val1");
-    await cache.set("OTHER_1", "val2");
     await cache.clear("ROUTE");
-    assert.strictEqual(lastClearPattern, "prefix:ROUTE");
+    assert.deepStrictEqual(clears, ["prefix:", "prefix:ROUTE"]);
   });
 
-  it("handles async store errors gracefully", async () => {
-    const errorStore: AsyncCacheStore = {
-      async get() {
-        throw new Error("Store error");
-      },
-      async set() {
-        throw new Error("Store error");
-      },
-      async clear() {
-        throw new Error("Store error");
-      },
+  it("isolates managers by prefix on a shared store", async () => {
+    const store = createLRUCacheStore();
+    const a = createCacheManager("a:", { store });
+    const b = createCacheManager("b:", { store });
+    await a.set("key", "A");
+    await b.set("key", "B");
+    await a.clear();
+    assert.strictEqual(await a.get("key"), undefined);
+    assert.strictEqual(await b.get("key"), "B");
+  });
+
+  it("evicts least recently used entries beyond max", async () => {
+    const cache = createCacheManager("test:", { max: 2 });
+    await cache.set("k1", "v1");
+    await cache.set("k2", "v2");
+    await cache.set("k3", "v3");
+    assert.strictEqual(await cache.get("k1"), undefined);
+    assert.strictEqual(await cache.get("k3"), "v3");
+  });
+
+  it("propagates store errors", async () => {
+    const fail = async () => {
+      throw new Error("Store error");
     };
-
-    const cache = createCacheManager("error:", { store: errorStore });
-
-    // Errors should propagate to caller
+    const cache = createCacheManager("error:", { store: { get: fail, set: fail, clear: fail } });
     await assert.rejects(() => cache.get("key"), { message: "Store error" });
-
-    await assert.rejects(() => cache.set("key", "value"), {
-      message: "Store error",
-    });
-
+    await assert.rejects(() => cache.set("key", "value"), { message: "Store error" });
     await assert.rejects(() => cache.clear(), { message: "Store error" });
+    await assert.rejects(() => cache.swr("key", async () => 1), { message: "Store error" });
   });
 });
 
 describe("createNoOpCacheManager", () => {
-  it("returns undefined for all get operations", async () => {
+  it("stores nothing and always fetches", async () => {
     const cache = createNoOpCacheManager();
     await cache.set("key", "value");
-
-    const result = await cache.get("key");
-    assert.strictEqual(result, undefined);
-  });
-
-  it("ignores set operations", async () => {
-    const cache = createNoOpCacheManager();
-    await cache.set("key1", "value1");
-    await cache.set("key2", { data: "value2" });
-
-    // Should not throw and should return undefined
-    assert.strictEqual(await cache.get("key1"), undefined);
-    assert.strictEqual(await cache.get("key2"), undefined);
-  });
-
-  it("ignores clear operations", async () => {
-    const cache = createNoOpCacheManager();
-    await cache.set("key", "value");
-    await cache.clear();
     await cache.clear("PATTERN");
-
-    // Should not throw
-    assert.ok(true);
-  });
-});
-
-describe("cache prefix handling", () => {
-  it("isolates cache entries by prefix", async () => {
-    const cache1 = createCacheManager("prefix1:");
-    const cache2 = createCacheManager("prefix2:");
-
-    await cache1.set("key", "value1");
-    await cache2.set("key", "value2");
-
-    assert.strictEqual(await cache1.get("key"), "value1");
-    assert.strictEqual(await cache2.get("key"), "value2");
-  });
-
-  it("clears only entries with matching prefix", async () => {
-    const cache1 = createCacheManager("prefix1:");
-    const cache2 = createCacheManager("prefix2:");
-
-    await cache1.set("key", "value1");
-    await cache2.set("key", "value2");
-
-    await cache1.clear();
-
-    assert.strictEqual(await cache1.get("key"), undefined);
-    assert.strictEqual(await cache2.get("key"), "value2");
+    assert.strictEqual(await cache.get("key"), undefined);
+    const { fetcher, calls } = counting((n) => ({ v: n }));
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: 1 });
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: 2 });
+    assert.strictEqual(calls(), 2);
   });
 });
 
 describe("cache.swr", () => {
-  it("fetches on cold cache and caches the result", async () => {
+  it("fetches on a cold cache and serves fresh hits from the cache", async () => {
     const cache = createCacheManager("swr:");
+    const { fetcher, calls } = counting(() => ({ v: "fresh" }));
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "fresh" });
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "fresh" });
+    assert.strictEqual(calls(), 1);
+  });
+
+  it("writes envelopes with the default windows", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: T0 });
+    const cache = createCacheManager("swr:");
+    await cache.set("k", { data: { v: "old" }, freshUntil: T0 - 2000, staleUntil: T0 - 1000 });
+    assert.deepStrictEqual(await cache.swr("k", async () => ({ v: "new" })), { v: "new" });
+    assert.deepStrictEqual(await cache.get("k"), {
+      data: { v: "new" },
+      freshUntil: T0 + DEFAULT_SWR_FRESH_MS,
+      staleUntil: T0 + DEFAULT_SWR_STALE_MS,
+    });
+  });
+
+  it("does not cache null (404) and writes nothing on a cold 404", async () => {
+    const { map, store } = createMapStore();
+    const cache = createCacheManager("swr:", { store });
+    const { fetcher, calls } = counting(() => null);
+    assert.strictEqual(await cache.swr("k", fetcher), null);
+    assert.strictEqual(await cache.swr("k", fetcher), null);
+    assert.strictEqual(calls(), 2);
+    assert.strictEqual(map.size, 0);
+  });
+
+  it("treats non-envelope values as a cold miss and replaces them", async () => {
+    const cache = createCacheManager("swr:");
+    await cache.set("obj", { v: "raw" });
+    await cache.set("str", "raw");
+    const { fetcher, calls } = counting(() => ({ v: "fetched" }));
+    assert.deepStrictEqual(await cache.swr("obj", fetcher), { v: "fetched" });
+    assert.deepStrictEqual(await cache.swr("str", fetcher), { v: "fetched" });
+    assert.strictEqual(calls(), 2);
+    assert.deepStrictEqual(((await cache.get("obj")) as { data: unknown }).data, { v: "fetched" });
+  });
+
+  it("dedupes concurrent cold callers (thundering herd)", async () => {
+    const cache = createCacheManager("swr:");
+    const { state, fetcher } = deferredFetcher<{ v: string }>();
+    const pending = [cache.swr("hot", fetcher), cache.swr("hot", fetcher), cache.swr("hot", fetcher)];
+    await flush();
+    state.resolve({ v: "shared" });
+    for (const r of await Promise.all(pending)) assert.deepStrictEqual(r, { v: "shared" });
+    assert.strictEqual(state.calls, 1);
+  });
+
+  it("isolates in-flight fetches across managers", async () => {
+    const a = deferredFetcher<string>();
+    const b = deferredFetcher<string>();
+    const pa = createCacheManager("A:").swr<string>("k", a.fetcher);
+    const pb = createCacheManager("B:").swr<string>("k", b.fetcher);
+    await flush();
+    a.state.resolve("A");
+    b.state.resolve("B");
+    assert.deepStrictEqual([await pa, await pb], ["A", "B"]);
+  });
+
+  it("rethrows errors without data or past staleUntil, and retries next time", async () => {
+    const cache = createCacheManager("swr:");
+    await cache.set("expired", { data: { v: "stale" }, freshUntil: 0, staleUntil: 0 });
+    let fail = true;
+    const fetcher = async () => {
+      if (fail) throw new Error("upstream down");
+      return { v: "recovered" };
+    };
+    for (const key of ["cold", "expired"]) {
+      await assert.rejects(() => cache.swr(key, fetcher), { message: "upstream down" });
+    }
+    fail = false;
+    assert.deepStrictEqual(await cache.swr("cold", fetcher), { v: "recovered" });
+  });
+
+  it("serves stale immediately and revalidates once in the background", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: T0 });
+    const cache = createCacheManager("swr:");
+    await cache.set("k", staleEnvelope({ v: "old" }));
+    const { state, fetcher } = deferredFetcher<{ v: string }>();
+
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+    assert.strictEqual(state.calls, 1, "background revalidation must dedupe");
+
+    state.resolve({ v: "new" });
+    await flush();
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "new" });
+    assert.strictEqual(state.calls, 1);
+  });
+
+  it("respects manager-level freshMs/staleMs", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: T0 });
+    const cache = createCacheManager("swr:", { swr: { freshMs: 1000, staleMs: 5000 } });
+    const { fetcher, calls } = counting((n) => ({ v: n }));
+
+    await cache.swr("k", fetcher);
+    t.mock.timers.tick(999);
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: 1 });
+    assert.strictEqual(calls(), 1, "within freshMs");
+
+    t.mock.timers.tick(1);
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: 1 }, "stale hit");
+    await flush();
+    assert.strictEqual(calls(), 2, "stale hit revalidates in the background");
+
+    // Revalidated at T0+1000, so it expires at T0+6000
+    t.mock.timers.tick(5000);
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: 3 }, "beyond staleMs blocks on a fetch");
+  });
+
+  it("keeps serving stale when the background refresh fails, without unhandled rejection", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: T0 });
+    const warn = t.mock.method(logger, "warn", () => {});
+    let unhandled: unknown;
+    const onUnhandled = (reason: unknown) => {
+      unhandled = reason;
+    };
+    process.once("unhandledRejection", onUnhandled);
+    t.after(() => process.off("unhandledRejection", onUnhandled));
+
+    const cache = createCacheManager("swr:");
+    const envelope = staleEnvelope({ v: "old" });
+    await cache.set("k", envelope);
     let calls = 0;
     const fetcher = async () => {
       calls += 1;
-      return { v: "fresh" };
+      throw new Error("upstream down");
     };
 
-    const first = await cache.swr("k", fetcher);
-    const second = await cache.swr("k", fetcher);
-
-    assert.deepStrictEqual(first, { v: "fresh" });
-    assert.deepStrictEqual(second, { v: "fresh" });
-    assert.strictEqual(calls, 1, "second fresh-hit must not re-fetch");
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+    await flush();
+    assert.strictEqual(unhandled, undefined);
+    assert.match(String(warn.mock.calls[0]?.arguments[0]), /background revalidate failed/);
+    assert.deepStrictEqual(await cache.get("k"), envelope, "old envelope must survive");
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+    assert.strictEqual(calls, 2, "in-flight entry released after the failure");
   });
 
-  it("does not cache null results", async () => {
+  describe("callers joining a failing refresh get the error", () => {
+    it("cold caller (entry evicted meanwhile)", async (t) => {
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      t.mock.method(logger, "warn", () => {});
+      const { map, store } = createMapStore();
+      const cache = createCacheManager("swr:", { store });
+      await cache.set("k", staleEnvelope({ v: "old" }));
+      const { state, fetcher } = deferredFetcher<{ v: string }>();
+
+      assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+      map.delete("swr:k");
+      const cold = cache.swr("k", fetcher);
+      await flush();
+      assert.strictEqual(state.calls, 1, "must join the in-flight refresh");
+      state.reject(new Error("upstream down"));
+      await assert.rejects(cold, { message: "upstream down" });
+    });
+
+    it("caller whose stale window elapsed meanwhile", async (t) => {
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      t.mock.method(logger, "warn", () => {});
+      const cache = createCacheManager("swr:");
+      await cache.set("k", staleEnvelope({ v: "old" }, 1000));
+      const { state, fetcher } = deferredFetcher<{ v: string }>();
+
+      assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+      t.mock.timers.tick(1000);
+      const expired = cache.swr("k", fetcher);
+      await flush();
+      assert.strictEqual(state.calls, 1);
+      state.reject(new Error("upstream down"));
+      await assert.rejects(expired, { message: "upstream down" });
+    });
+  });
+
+  it("clear() during a refresh prevents the write-back and is not joined", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: T0 });
     const cache = createCacheManager("swr:");
-    let calls = 0;
-    const fetcher = async () => {
-      calls += 1;
-      return null;
+    await cache.set("k", staleEnvelope({ v: "old" }));
+    const { state, fetcher } = deferredFetcher<{ v: string }>();
+
+    assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+    const resolveFirst = state.resolve;
+    await cache.clear();
+
+    const after = cache.swr("k", fetcher);
+    await flush();
+    assert.strictEqual(state.calls, 2, "a cold caller after clear() starts its own fetch");
+
+    resolveFirst({ v: "pre-clear" });
+    await flush();
+    assert.strictEqual(await cache.get("k"), undefined, "pre-clear result must not be written back");
+
+    const joiner = cache.swr("k", fetcher);
+    await flush();
+    assert.strictEqual(state.calls, 2, "the settled pre-clear fetch must not evict the new in-flight entry");
+
+    state.resolve({ v: "post-clear" });
+    assert.deepStrictEqual(await after, { v: "post-clear" });
+    assert.deepStrictEqual(await joiner, { v: "post-clear" });
+    assert.deepStrictEqual(((await cache.get("k")) as { data: unknown }).data, { v: "post-clear" });
+  });
+
+  describe("404 expires cached data (tombstone)", () => {
+    it("stale envelope: deleted data is never served again, not even on upstream failure", async (t) => {
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      const cache = createCacheManager("swr:");
+      await cache.set("k", staleEnvelope({ v: "deleted upstream" }));
+      const { state, fetcher } = deferredFetcher<{ v: string } | null>();
+
+      assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "deleted upstream" });
+      state.resolve(null);
+      await flush();
+
+      const nulls = counting(() => null);
+      assert.strictEqual(await cache.swr("k", nulls.fetcher), null);
+      assert.strictEqual(nulls.calls(), 1, "a 404 is not cached as fresh");
+      await assert.rejects(
+        () =>
+          cache.swr("k", async () => {
+            throw new Error("upstream down");
+          }),
+        { message: "upstream down" },
+      );
+    });
+
+    it("refills a tombstoned key once upstream has data again", async () => {
+      const cache = createCacheManager("swr:");
+      await cache.set("k", { data: { v: "old" }, freshUntil: 0, staleUntil: 0 });
+      await cache.swr("k", async () => null);
+      assert.deepStrictEqual(await cache.swr("k", async () => ({ v: "back" })), { v: "back" });
+      assert.deepStrictEqual(await cache.swr("k", async () => assert.fail("fresh hit expected")), { v: "back" });
+    });
+  });
+
+  describe("background refresh errors by status", () => {
+    const httpError = (status: number) => new CockpitHttpError(status, new URL("https://cms.example.com/api/x"));
+    const setup = async (t: TestContext) => {
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      t.mock.method(logger, "warn", () => {});
+      const cache = createCacheManager("bg:");
+      await cache.set("k", staleEnvelope({ v: "old" }));
+      return cache;
     };
 
-    await cache.swr("k", fetcher);
-    await cache.swr("k", fetcher);
-
-    assert.strictEqual(calls, 2, "null results must not be cached");
-  });
-
-  it("dedupes concurrent cold-cache callers (thundering herd)", async () => {
-    const cache = createCacheManager("swr:");
-    let calls = 0;
-    const resolvers: Array<(v: { v: string }) => void> = [];
-    const fetcher = () => {
-      calls += 1;
-      return new Promise<{ v: string }>((resolve) => {
-        resolvers.push(resolve);
+    for (const status of [401, 403]) {
+      it(`expires the entry on ${String(status)} (revoked credentials)`, async (t) => {
+        const cache = await setup(t);
+        const { fetcher, calls } = counting(() => {
+          throw httpError(status);
+        });
+        assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+        await flush();
+        await flush();
+        await assert.rejects(() => cache.swr("k", fetcher), { status });
+        assert.strictEqual(calls(), 2);
       });
-    };
+    }
 
-    const inflightPromises = [
-      cache.swr("hot", fetcher),
-      cache.swr("hot", fetcher),
-      cache.swr("hot", fetcher),
-    ];
-
-    // Yield so the deduped fetcher invocation registers its resolver.
-    await new Promise<void>((r) => setImmediate(r));
-    assert.strictEqual(resolvers.length, 1, "fetcher should be invoked once");
-
-    resolvers[0]({ v: "shared" });
-    const results = await Promise.all(inflightPromises);
-
-    assert.strictEqual(calls, 1, "thundering herd must collapse to one fetch");
-    for (const r of results) {
-      assert.deepStrictEqual(r, { v: "shared" });
+    for (const status of [400, 422, 429, 500, 503]) {
+      it(`keeps serving stale on ${String(status)}`, async (t) => {
+        const cache = await setup(t);
+        const fetcher = async () => {
+          throw httpError(status);
+        };
+        assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+        await flush();
+        await flush();
+        assert.deepStrictEqual(await cache.swr("k", fetcher), { v: "old" });
+      });
     }
   });
 
-  it("serves stale data on upstream error if envelope exists", async () => {
-    const cache = createCacheManager("swr:");
-    // Seed an expired envelope manually
-    await cache.set("k", {
-      data: { v: "stale" },
-      freshUntil: 0,
-      staleUntil: 0,
+  it("serves stale data when the revalidating request times out", async (t) => {
+    const originalFetch = globalThis.fetch;
+    t.after(() => {
+      globalThis.fetch = originalFetch;
     });
-
-    const result = await cache.swr("k", async () => {
-      throw new Error("upstream down");
-    });
-
-    assert.deepStrictEqual(result, { v: "stale" });
-  });
-
-  it("rethrows upstream errors when no envelope exists", async () => {
-    const cache = createCacheManager("swr:");
-    await assert.rejects(
-      () =>
-        cache.swr("k", async () => {
-          throw new Error("upstream down");
-        }),
-      { message: "upstream down" },
-    );
-  });
-
-  it("serves stale immediately and revalidates in background", async () => {
-    const cache = createCacheManager("swr:");
-    const now = Date.now();
-    // Seed a stale-but-not-expired envelope
-    await cache.set("k", {
-      data: { v: "old" },
-      freshUntil: now - 1000,
-      staleUntil: now + 60_000,
-    });
-
-    let calls = 0;
-    let resolveFetch: (v: { v: string }) => void = () => {};
-    const fetcher = () => {
-      calls += 1;
-      return new Promise<{ v: string }>((resolve) => {
-        resolveFetch = resolve;
+    t.mock.method(logger, "warn", () => undefined);
+    let hang = false;
+    globalThis.fetch = mock.fn<typeof fetch>((_input, init) => {
+      if (!hang) return Promise.resolve(new Response(JSON.stringify({ v: 1 })));
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason as Error));
       });
-    };
+    });
+    const http = createHttpClient(createConfig({ endpoint: "https://cms.example.com/api/graphql", timeout: 20 }));
+    const url = new URL("https://cms.example.com/api/pages/pages");
+    const cache = createCacheManager("timeout:", { swr: { freshMs: 0, staleMs: 60_000 } });
 
-    const result = await cache.swr("k", fetcher);
-    assert.deepStrictEqual(result, { v: "old" }, "must serve stale synchronously");
-    assert.strictEqual(calls, 1, "must trigger one background revalidate");
-
-    // Let the background revalidation complete and write through
-    resolveFetch({ v: "new" });
-    await new Promise<void>((r) => setImmediate(r));
-
-    const next = await cache.swr("k", fetcher);
-    assert.deepStrictEqual(next, { v: "new" }, "next call must see refreshed data");
-    assert.strictEqual(calls, 1, "background revalidate must dedupe");
+    assert.deepStrictEqual(await cache.swr("k", () => http.fetch(url)), { v: 1 });
+    hang = true;
+    assert.deepStrictEqual(await cache.swr("k", () => http.fetch(url)), { v: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.deepStrictEqual(await cache.swr("k", () => http.fetch(url)), { v: 1 });
+    await assert.rejects(() => cache.swr("other", () => http.fetch(url)), /Cockpit: request timed out after 20ms/);
   });
+});
 
-  it("isolates inflight maps across cache manager instances", async () => {
-    const cacheA = createCacheManager("tenantA:");
-    const cacheB = createCacheManager("tenantB:");
+describe("cached values are private copies", () => {
+  type Doc = { items: { title: string }[] };
+  const doc = (): Doc => ({ items: [{ title: "original" }] });
 
-    let callsA = 0;
-    let callsB = 0;
-    const resolversA: Array<(v: string) => void> = [];
-    const resolversB: Array<(v: string) => void> = [];
+  for (const kind of ["built-in", "custom (shared references)"] as const) {
+    const make = () =>
+      kind === "built-in" ? createCacheManager("iso:") : createCacheManager("iso:", { store: createMapStore().store });
 
-    const promiseA = cacheA.swr<string>("same-key", () => {
-      callsA += 1;
-      return new Promise((resolve) => resolversA.push(resolve));
+    it(`mutating swr results never affects the next caller (${kind} store)`, async () => {
+      const cache = make();
+      const first = (await cache.swr<Doc>("k", async () => doc())) as Doc;
+      first.items[0]!.title = "mutated";
+      first.items.push({ title: "extra" });
+      const second = (await cache.swr<Doc>("k", async () => assert.fail("should hit cache"))) as Doc;
+      assert.deepStrictEqual(second, doc());
+      second.items[0]!.title = "mutated again";
+      assert.deepStrictEqual(await cache.swr<Doc>("k", async () => assert.fail("should hit cache")), doc());
     });
-    const promiseB = cacheB.swr<string>("same-key", () => {
-      callsB += 1;
-      return new Promise((resolve) => resolversB.push(resolve));
-    });
 
-    await new Promise<void>((r) => setImmediate(r));
-    assert.strictEqual(resolversA.length, 1);
+    it(`get/set do not share references (${kind} store)`, async () => {
+      const cache = make();
+      const value = doc();
+      await cache.set("k", value);
+      value.items[0]!.title = "mutated after set";
+      const read = (await cache.get("k")) as Doc;
+      assert.deepStrictEqual(read, doc());
+      read.items[0]!.title = "mutated after get";
+      assert.deepStrictEqual(await cache.get("k"), doc());
+    });
+  }
+
+  it("concurrent callers joining one fetch get independent objects", async () => {
+    const cache = createCacheManager("iso:");
+    const { state, fetcher } = deferredFetcher<Doc>();
+    const a = cache.swr<Doc>("k", fetcher);
+    const b = cache.swr<Doc>("k", fetcher);
+    await flush();
+    state.resolve(doc());
+    const [ra, rb] = (await Promise.all([a, b])) as [Doc, Doc];
+    assert.notStrictEqual(ra, rb);
+    ra.items[0]!.title = "mutated";
+    assert.strictEqual(rb.items[0]!.title, "original");
+  });
+});
+
+describe("hashOpts", () => {
+  it("is independent of object key order (recursively), array order counts", () => {
     assert.strictEqual(
-      resolversB.length,
-      1,
-      "tenant B must not be deduped against tenant A",
+      hashOpts({ a: 1, b: { x: 1, y: [1, { p: 1, q: 2 }] } }),
+      hashOpts({ b: { y: [1, { q: 2, p: 1 }], x: 1 }, a: 1 }),
     );
-
-    resolversA[0]("A");
-    resolversB[0]("B");
-
-    assert.strictEqual(await promiseA, "A");
-    assert.strictEqual(await promiseB, "B");
-    assert.strictEqual(callsA, 1);
-    assert.strictEqual(callsB, 1);
+    assert.notStrictEqual(hashOpts({ a: [1, 2] }), hashOpts({ a: [2, 1] }));
   });
 
-  it("respects custom freshMs and staleMs", async () => {
-    const cache = createCacheManager("swr:");
-    let calls = 0;
-    const fetcher = async () => {
-      calls += 1;
-      return { v: calls };
-    };
-
-    // Tiny freshMs so the second call sees stale
-    await cache.swr("k", fetcher, { freshMs: 1, staleMs: 60_000 });
-    await new Promise<void>((r) => setTimeout(r, 5));
-
-    // Stale hit returns cached + triggers background refresh
-    const stale = await cache.swr("k", fetcher, {
-      freshMs: 1,
-      staleMs: 60_000,
-    });
-    assert.deepStrictEqual(stale, { v: 1 });
-
-    // Drain microtasks so the background revalidate completes
-    await new Promise<void>((r) => setImmediate(r));
-    assert.strictEqual(calls, 2);
-  });
-
-  it("uses manager-level swr defaults when per-call options are omitted", async () => {
-    const cache = createCacheManager("swr:", {
-      swr: { freshMs: 1, staleMs: 60_000 },
-    });
-    let calls = 0;
-    const fetcher = async () => {
-      calls += 1;
-      return { v: calls };
-    };
-
-    await cache.swr("k", fetcher);
-    await new Promise<void>((r) => setTimeout(r, 5));
-
-    // With managerSwrDefaults.freshMs = 1ms, the second call is a stale hit:
-    // serves cached value synchronously and kicks off a background refetch.
-    const stale = await cache.swr("k", fetcher);
-    assert.deepStrictEqual(stale, { v: 1 });
-
-    await new Promise<void>((r) => setImmediate(r));
-    assert.strictEqual(
-      calls,
-      2,
-      "background revalidate must run under manager defaults",
-    );
-  });
-
-  it("per-call swr options override manager-level defaults", async () => {
-    const cache = createCacheManager("swr:", {
-      swr: { freshMs: 1, staleMs: 60_000 },
-    });
-    let calls = 0;
-    const fetcher = async () => {
-      calls += 1;
-      return { v: calls };
-    };
-
-    await cache.swr("k", fetcher, { freshMs: 60_000, staleMs: 60_000 });
-    await new Promise<void>((r) => setTimeout(r, 5));
-
-    // Per-call freshMs=60s wins over manager freshMs=1ms — second call is a
-    // fresh hit and must not refetch.
-    const fresh = await cache.swr("k", fetcher, {
-      freshMs: 60_000,
-      staleMs: 60_000,
-    });
-    assert.deepStrictEqual(fresh, { v: 1 });
-    assert.strictEqual(calls, 1, "per-call options must override manager defaults");
-  });
-
-  it("noop cache.swr always invokes the fetcher (no caching)", async () => {
-    const cache = createNoOpCacheManager();
-    let calls = 0;
-    const fetcher = async () => {
-      calls += 1;
-      return { v: calls };
-    };
-
-    const a = await cache.swr("k", fetcher);
-    const b = await cache.swr("k", fetcher);
-
-    assert.deepStrictEqual(a, { v: 1 });
-    assert.deepStrictEqual(b, { v: 2 });
-    assert.strictEqual(calls, 2);
+  it("distinguishes values and ignores undefined like JSON", () => {
+    assert.notStrictEqual(hashOpts({ a: 1 }), hashOpts({ a: 2 }));
+    assert.strictEqual(hashOpts({ a: 1, b: undefined }), hashOpts({ a: 1 }));
+    assert.notStrictEqual(hashOpts({ a: null }), hashOpts({}));
   });
 });

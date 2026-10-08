@@ -2,15 +2,13 @@
  * GraphQL schema builder for Cockpit CMS schema stitching
  */
 
-import { buildClientSchema, type GraphQLSchema } from "graphql";
+import { buildClientSchema, GraphQLSchema } from "graphql";
 import {
   createRemoteExecutor,
   type MakeCockpitSchemaOptions,
 } from "./executor.ts";
 
-/**
- * Interface for the @graphql-tools/wrap module (for type safety without requiring the dep)
- */
+/** The parts of `@graphql-tools/wrap` used here (optional peer dependency) */
 interface GraphQLToolsWrapModule {
   schemaFromExecutor: (executor: unknown) => Promise<GraphQLSchema>;
   wrapSchema: (config: {
@@ -18,51 +16,39 @@ interface GraphQLToolsWrapModule {
     executor: unknown;
     transforms?: unknown[];
   }) => GraphQLSchema;
-  FilterRootFields: new (
-    filter: (operationName: string, fieldName: string) => boolean,
-  ) => unknown;
 }
 
 /**
- * Creates a GraphQL schema from Cockpit's introspected schema for schema stitching
- *
- * Requires `@graphql-tools/wrap` as a peer dependency.
+ * Drops the Mutation root type (filtering its fields would leave an invalid,
+ * empty `type Mutation`)
+ */
+function withoutMutations(schema: GraphQLSchema): GraphQLSchema {
+  const mutationType = schema.getMutationType();
+  if (!mutationType) return schema;
+  const config = schema.toConfig();
+  return new GraphQLSchema({
+    ...config,
+    mutation: null,
+    types: config.types.filter((type) => type !== mutationType),
+  });
+}
+
+/**
+ * Stitchable GraphQL schema of Cockpit, read-only by default (see
+ * `filterMutations`). Requires the `@graphql-tools/wrap` peer dependency.
  *
  * @example
  * ```typescript
- * import { makeCockpitGraphQLSchema } from "@unchainedshop/cockpit-api/schema";
- *
- * // Basic usage - creates read-only schema with tenant header support
- * const schema = await makeCockpitGraphQLSchema();
- *
- * // Custom configuration
  * const schema = await makeCockpitGraphQLSchema({
- *   tenantHeader: "x-cockpit-space",
- *   filterMutations: true,
- *   cockpitOptions: {
- *     endpoint: "https://cms.example.com/api/graphql",
- *   },
+ *   allowedTenants: ["mytenant"],
+ *   cockpitOptions: { endpoint: "https://cms.example.com/api/graphql" },
  * });
- *
- * // Use with schema stitching
- * import { stitchSchemas } from "@graphql-tools/stitch";
- *
- * const gatewaySchema = stitchSchemas({
- *   subschemas: [
- *     { schema: await makeCockpitGraphQLSchema() },
- *     // ... other subschemas
- *   ],
- * });
+ * const gateway = stitchSchemas({ subschemas: [{ schema }] });
  * ```
- *
- * @param options - Configuration options
- * @returns Promise resolving to the GraphQL schema
- * @throws Error if @graphql-tools/wrap is not installed
  */
 export async function makeCockpitGraphQLSchema(
   options: MakeCockpitSchemaOptions = {},
 ): Promise<GraphQLSchema> {
-  // Dynamic import to handle optional peer dependency
   let wrapModule: GraphQLToolsWrapModule;
   try {
     wrapModule =
@@ -74,36 +60,22 @@ export async function makeCockpitGraphQLSchema(
     );
   }
 
-  const { schemaFromExecutor, wrapSchema, FilterRootFields } = wrapModule;
+  const { schemaFromExecutor, wrapSchema } = wrapModule;
   const { filterMutations = true, transforms = [], introspection } = options;
 
-  const executor = createRemoteExecutor(options);
+  // The executor enforces read-only mode too (operations bypassing the schema)
+  const executor = createRemoteExecutor({ ...options, filterMutations });
 
-  // Build the list of transforms
-  const allTransforms: unknown[] = [];
-
-  // Add mutation filter if enabled (default)
-  if (filterMutations) {
-    allTransforms.push(
-      new FilterRootFields(
-        (operationName: string) => operationName !== "Mutation",
-      ),
-    );
-  }
-
-  // Add user-provided transforms
-  allTransforms.push(...transforms);
-
-  // Build the introspected schema. When a pre-loaded introspection JSON is
-  // provided, use it (decouples boot from cockpit reachability). Otherwise
-  // fall back to fetching introspection live via the executor.
   const introspectedSchema = introspection
     ? buildClientSchema(introspection)
     : await schemaFromExecutor(executor);
 
+  // User transforms already see the read-only schema
   return wrapSchema({
-    schema: introspectedSchema,
+    schema: filterMutations
+      ? withoutMutations(introspectedSchema)
+      : introspectedSchema,
     executor,
-    transforms: allTransforms,
+    transforms,
   });
 }

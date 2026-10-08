@@ -12,39 +12,17 @@ export type {
   CacheManager,
   CacheOptions,
   AsyncCacheStore,
-  SwrOptions,
-  SwrDefaults,
 } from "./core/cache.ts";
+export { createLRUCacheStore } from "./core/cache.ts";
+export { CockpitHttpError } from "./core/http.ts";
 
-export {
-  getTenantIds,
-  resolveTenantFromUrl,
-  resolveTenantFromSubdomain,
-} from "./utils/tenant.ts";
+export { getTenantIds, resolveTenantFromUrl } from "./utils/tenant.ts";
 export type {
   TenantUrlResult,
   ResolveTenantFromUrlOptions,
-  ResolveTenantFromSubdomainOptions,
 } from "./utils/tenant.ts";
 
-export {
-  generateCmsRouteReplacements,
-  generateCollectionAndSingletonSlugRouteMap,
-} from "./utils/route-map.ts";
-
-export type { ResponseTransformer } from "./transformers/image-path.ts";
-export {
-  createImagePathTransformer,
-  identityTransformer,
-} from "./transformers/image-path.ts";
-export {
-  createAssetPathTransformer,
-  createPageLinkTransformer,
-  composeTransformers,
-} from "./transformers/index.ts";
-
 export type {
-  MethodContext,
   ListQueryOptions,
   ContentItemQueryOptions,
   ContentListQueryOptions,
@@ -104,8 +82,6 @@ export type { CockpitHealthCheck } from "./methods/system.ts";
 
 export {
   parseCockpitUrl,
-  isCockpitPageUrl,
-  isCockpitAssetUrl,
   extractPageId,
   extractAssetId,
 } from "./utils/url-protocols.ts";

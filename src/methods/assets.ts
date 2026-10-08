@@ -2,8 +2,8 @@
  * Asset API methods
  */
 
-import type { MethodContext } from "./content.ts";
-import { requireParam } from "../core/validation.ts";
+import { requireParam } from "../core/url.ts";
+import { get, segment, type MethodContext } from "./context.ts";
 
 export interface CockpitAsset {
   _id: string;
@@ -44,32 +44,19 @@ export enum MimeType {
   BMP = "bmp",
 }
 
-/**
- * Image transformation parameters for imageAssetById.
- *
- * At least one of `w` (width) or `h` (height) must be provided.
- * The Cockpit CMS API requires this and returns a 400 error without it.
- */
+/** Image transformation parameters; Cockpit requires `w` or `h` (400 otherwise) */
 export type ImageAssetQueryParams = {
   m?: ImageSizeMode;
   q?: number;
   mime?: MimeType;
-  re?: number;
   t?: string;
-  o?: number;
 } & ({ w: number; h?: number } | { w?: number; h: number });
 
-/**
- * Options for uploading assets
- */
 export interface UploadAssetsOptions {
-  /** Target folder name for upload */
+  /** Target folder name */
   folder?: string;
 }
 
-/**
- * Response from asset upload
- */
 export interface UploadAssetsResponse {
   assets: CockpitAsset[];
 }
@@ -77,35 +64,15 @@ export interface UploadAssetsResponse {
 export interface AssetMethods {
   assetById<T = CockpitAsset>(assetId: string): Promise<T | null>;
   /**
-   * Get a transformed image asset URL.
-   *
-   * **Important:** At least one of `w` (width) or `h` (height) must be provided.
-   * The Cockpit CMS API requires this and returns a 400 error without it.
-   *
-   * @param assetId - The asset ID
-   * @param queryParams - Image transformation parameters (w or h required)
-   * @returns URL string to the generated image, or null if not found
+   * URL of a generated image (Cockpit answers with plain text). URLs on the
+   * endpoint's origin get the same base URL as asset paths in JSON responses
+   * (`publicUrl` / `relativeAssetPaths`); other hosts are returned as-is.
    */
   imageAssetById(
     assetId: string,
     queryParams: ImageAssetQueryParams,
   ): Promise<string | null>;
-  /**
-   * Upload assets to Cockpit CMS (Unchained module).
-   *
-   * Requires admin access (API key with assets/upload permission).
-   *
-   * @param files - Files to upload (File objects or Blob with name)
-   * @param options - Upload options (optional folder name)
-   * @returns Uploaded assets metadata
-   *
-   * @example
-   * ```typescript
-   * const file = new File(['content'], 'test.txt', { type: 'text/plain' });
-   * const result = await client.uploadAssets([file], { folder: 'documents' });
-   * console.log(result?.assets);
-   * ```
-   */
+  /** Uploads files (Unchained module, always admin access: assets/upload) */
   uploadAssets(
     files: File[],
     options?: UploadAssetsOptions,
@@ -113,45 +80,62 @@ export interface AssetMethods {
 }
 
 export function createAssetMethods(ctx: MethodContext): AssetMethods {
+  const { endpoint, publicUrl, relativeAssetPaths } = ctx.config;
+  const assetBaseUrl = relativeAssetPaths ? "" : publicUrl;
+
+  /** Rebases absolute URLs on the endpoint's origin (path, tenant prefix kept) */
+  const rebase = (value: string): string => {
+    if (assetBaseUrl === undefined) return value;
+    let parsed: URL;
+    try {
+      parsed = new URL(value.trim());
+    } catch {
+      return value;
+    }
+    if (parsed.origin !== endpoint.origin) return value;
+    return `${assetBaseUrl}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  };
+
   return {
     async assetById<T = CockpitAsset>(assetId: string): Promise<T | null> {
-      requireParam(assetId, "assetId");
-      const url = ctx.url.build(`/assets/${assetId}`);
-      return ctx.http.fetch<T>(url);
+      return get<T>(ctx, `/assets/${segment(assetId, "assetId")}`, {
+        cache: false,
+      });
     },
 
     async imageAssetById(
       assetId: string,
-      queryParams?: ImageAssetQueryParams,
+      queryParams: ImageAssetQueryParams,
     ): Promise<string | null> {
-      requireParam(assetId, "assetId");
-      const url = ctx.url.build(`/assets/image/${assetId}`, {
-        queryParams: queryParams as Record<string, unknown>,
+      // `o` (binary output) and `re` (redirect) would return the image itself
+      const params: Record<string, unknown> = { ...queryParams };
+      delete params["o"];
+      delete params["re"];
+      const url = ctx.url.build(
+        `/assets/image/${segment(assetId, "assetId")}`,
+        {
+          queryParams: params,
+        },
+      );
+      const imageUrl = await ctx.http.request<string>("GET", url, {
+        text: true,
       });
-      return ctx.http.fetchText(url);
+      return imageUrl === null ? null : rebase(imageUrl);
     },
 
     async uploadAssets(
       files: File[],
-      options: UploadAssetsOptions = {},
+      { folder }: UploadAssetsOptions = {},
     ): Promise<UploadAssetsResponse | null> {
       requireParam(files, "files");
-      if (files.length === 0) {
-        return { assets: [] };
-      }
-
-      const formData = new FormData();
-      for (const file of files) {
-        formData.append("files[]", file);
-      }
-
+      if (files.length === 0) return { assets: [] };
+      const form = new FormData();
+      for (const file of files) form.append("files[]", file);
       const url = ctx.url.build("/unchained/assets/upload", {
-        queryParams: {
-          ...(options.folder && { folder: options.folder }),
-        },
+        queryParams: { folder: folder === "" ? undefined : folder },
       });
-
-      return ctx.http.postFormData<UploadAssetsResponse>(url, formData, {
+      return ctx.http.request<UploadAssetsResponse>("POST", url, {
+        form,
         useAdminAccess: true,
       });
     },

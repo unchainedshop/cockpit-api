@@ -1,6 +1,6 @@
 {
   "name": "@unchainedshop/cockpit-api",
-  "version": "2.7.0",
+  "version": "3.0.0",
   "description": "A package to interact with the Cockpit CMS API, including functionalities to handle GraphQL requests and various CMS content manipulations.",
   "main": "dist/index.js",
   "homepage": "https://unchained.shop",
@@ -19,15 +19,22 @@
       "import": "./dist/fetch/index.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org"
   },
   "scripts": {
     "build": "tsc",
+    "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && npm run build",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "test": "node --experimental-transform-types --test --experimental-test-coverage --test-coverage-exclude='src/index.ts' --test-coverage-exclude='src/**/*.test.ts' --test-coverage-exclude='src/__tests__/*' src/*.test.ts src/**/*.test.ts",
-    "test:watch": "node --experimental-transform-types --test --watch src/*.test.ts src/**/*.test.ts"
+    "test": "node --experimental-transform-types --test --test-timeout=10000 --experimental-test-coverage --test-coverage-exclude='src/index.ts' --test-coverage-exclude='src/**/*.test.ts' --test-coverage-exclude='src/__tests__/*' 'src/*.test.ts' 'src/[!_]*/**/*.test.ts'",
+    "test:watch": "node --experimental-transform-types --test --test-timeout=10000 --watch 'src/*.test.ts' 'src/[!_]*/**/*.test.ts'",
+    "test:integration": "node --experimental-transform-types --test --test-timeout=30000 'src/__tests__/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.test.json"
   },
   "repository": {
     "type": "git",
@@ -50,13 +57,13 @@
     "node": ">=25"
   },
   "dependencies": {
-    "@unchainedshop/logger": "^4.8.13",
-    "lru-cache": "^11.5.1"
+    "@unchainedshop/logger": "^4.8.29",
+    "lru-cache": "^11.5.3"
   },
   "types": "dist/index.d.ts",
   "peerDependencies": {
     "@graphql-tools/wrap": "^10.0.0 || ^11.0.0",
-    "graphql": "^15.0.0 || ^16.0.0"
+    "graphql": "^15.0.0 || ^16.0.0 || ^17.0.0"
   },
   "peerDependenciesMeta": {
     "graphql": {
@@ -68,14 +75,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@graphql-tools/wrap": "11.1.15",
-    "@types/node": "^25.9.1",
-    "eslint": "^10.4.1",
+    "@graphql-tools/wrap": "^11.2.0",
+    "@types/node": "^26.6.4",
+    "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
-    "graphql": "^16.14.1",
-    "prettier": "^3.8.3",
+    "graphql": "^17.0.2",
+    "prettier": "^3.9.9",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.60.1"
+    "typescript-eslint": "^8.71.1"
   }
 }

@@ -2,7 +2,8 @@
  * System API methods
  */
 
-import type { MethodContext } from "./content.ts";
+import { ROUTE_MAPS_PREFIX } from "../links.ts";
+import { get, type MethodContext } from "./context.ts";
 
 export interface CockpitHealthCheck {
   status: "ok" | "error";
@@ -13,36 +14,39 @@ export interface CockpitHealthCheck {
 
 export interface SystemMethods {
   healthCheck<T = unknown>(): Promise<T | null>;
-  /**
-   * Clear cache entries matching pattern
-   *
-   * **BREAKING CHANGE (v3.0.0)**: This method is now async and returns a Promise
-   *
-   * @param pattern - Optional pattern to clear specific cache entries
-   * @returns Promise that resolves when clearing is complete
-   *
-   * @example Clear all cache
-   * ```typescript
-   * await client.clearCache();
-   * ```
-   *
-   * @example Clear route cache only
-   * ```typescript
-   * await client.clearCache('ROUTE');
-   * ```
-   */
+  /** Clears cached entries whose key starts with `pattern` (all without) */
   clearCache(pattern?: string): Promise<void>;
+  /**
+   * Invalidates everything derived from page routes, e.g. after pages were
+   * moved or (un)published: route maps (all locales), `pageByRoute` lookups,
+   * `pagesRoutes` and `pagesSitemap`. Other cached content stays; its links
+   * resolve against the refreshed maps on the next read.
+   */
+  clearRouteCache(): Promise<void>;
 }
+
+/** Cache key prefixes cleared by `clearRouteCache()` (see `cacheKey`) */
+export const ROUTE_CACHE_PREFIXES: readonly string[] = [
+  ROUTE_MAPS_PREFIX,
+  "/pages/page|",
+  "/pages/routes|",
+  "/pages/sitemap|",
+];
 
 export function createSystemMethods(ctx: MethodContext): SystemMethods {
   return {
     async healthCheck<T = unknown>(): Promise<T | null> {
-      const url = ctx.url.build("/system/healthcheck");
-      return ctx.http.fetch<T>(url);
+      return get<T>(ctx, "/system/healthcheck", { cache: false, links: false });
     },
 
     async clearCache(pattern?: string): Promise<void> {
       await ctx.cache.clear(pattern);
+    },
+
+    async clearRouteCache(): Promise<void> {
+      await Promise.all(
+        ROUTE_CACHE_PREFIXES.map((prefix) => ctx.cache.clear(prefix)),
+      );
     },
   };
 }
