@@ -43,8 +43,12 @@ export interface AsyncCacheStore {
 export interface CacheOptions {
   /** Entries of the built-in LRU store (env: COCKPIT_CACHE_MAX, default: 100) */
   max?: number;
-  /** Stale-while-revalidate windows in ms (defaults: fresh 1 h, stale 30 days) */
-  swr?: { freshMs?: number; staleMs?: number };
+  /**
+   * Windows in ms, counted from the fetch: served as is (fresh, default 1 h),
+   * served while refreshing in the background (stale, default 30 days), and
+   * served when a refresh fails (staleIfError, default: the stale window)
+   */
+  swr?: { freshMs?: number; staleMs?: number; staleIfErrorMs?: number };
   /** Custom store; `max` is then ignored */
   store?: AsyncCacheStore;
 }
@@ -58,9 +62,11 @@ export interface CacheManager {
   /**
    * Fresh hit: cached data. Stale hit: cached data, plus one deduped
    * background refresh. Cold or past the stale window: waits for the fetcher
-   * (concurrent callers share it); its errors propagate. A failed background
-   * refresh keeps the stale entry, except on 401/403 (revoked credentials),
-   * which expire it. `null` (404) is not cached and expires existing data.
+   * (concurrent callers share it); its errors propagate, unless the
+   * stale-if-error window still covers cached data, which is then served. A
+   * failed background refresh keeps the stale entry, except on 401/403
+   * (revoked credentials), which expire it. `null` (404) is not cached and
+   * expires existing data.
    */
   swr<T>(key: string, fetcher: () => Promise<T | null>): Promise<T | null>;
 }
@@ -70,12 +76,26 @@ interface SwrEnvelope<T> {
   data: T | null;
   freshUntil: number;
   staleUntil: number;
+  /** Only set when it extends the stale window; else `staleUntil` */
+  errorUntil?: number;
 }
 
 const isEnvelope = <T>(value: unknown): value is SwrEnvelope<T> =>
   typeof value === "object" && value !== null && "staleUntil" in value;
 
 const copy = <T>(value: T): T => structuredClone(value);
+
+// Data fetched with revoked credentials must not be served
+const isRevoked = (err: unknown): boolean =>
+  err instanceof CockpitHttpError && (err.status === 401 || err.status === 403);
+
+/** Cached data a failed refresh may still serve (stale-if-error window) */
+const servableOnError = <T>(
+  value: unknown,
+): value is SwrEnvelope<T> & { data: T } =>
+  isEnvelope<T>(value) &&
+  value.data !== null &&
+  Date.now() < (value.errorUntil ?? value.staleUntil);
 
 /** In-memory LRU store; the manager copies, so it stores references as-is */
 export function createLRUCacheStore({
@@ -105,6 +125,7 @@ export function createCacheManager(
   const store = options.store ?? createLRUCacheStore(options);
   const freshMs = options.swr?.freshMs ?? DEFAULT_SWR_FRESH_MS;
   const staleMs = options.swr?.staleMs ?? DEFAULT_SWR_STALE_MS;
+  const staleIfErrorMs = Math.max(staleMs, options.swr?.staleIfErrorMs ?? 0);
   const inflight = new Map<string, Promise<unknown>>();
 
   const read = (key: string): Promise<unknown> =>
@@ -150,17 +171,16 @@ export function createCacheManager(
                 data: fresh,
                 freshUntil: t + freshMs,
                 staleUntil: t + staleMs,
+                ...(staleIfErrorMs > staleMs
+                  ? { errorUntil: t + staleIfErrorMs }
+                  : {}),
               });
             } else if (hadData) {
               await expire(key); // 404: never serve the deleted data again
             }
             return fresh;
           } catch (err) {
-            const revoked =
-              err instanceof CockpitHttpError &&
-              (err.status === 401 || err.status === 403);
-            // Data fetched with revoked credentials must not be served
-            if (revoked && hadData && current()) {
+            if (isRevoked(err) && hadData && current()) {
               await expire(key).catch((e: unknown) => {
                 logger.warn(`Cockpit: Failed to expire ${key}`, e);
               });
@@ -186,7 +206,16 @@ export function createCacheManager(
 
       // Cold or expired: wait for upstream; joiners get their own copy
       const joined = inflight.get(key) as Promise<T | null> | undefined;
-      return joined ? copy(await joined) : refresh();
+      try {
+        return joined ? copy(await joined) : await refresh();
+      } catch (err) {
+        if (isRevoked(err)) throw err;
+        // Re-read so a clear() or 404 tombstone in the meantime is respected
+        const latest = await read(key).catch(() => undefined);
+        if (!servableOnError<T>(latest)) throw err;
+        logger.warn(`SWR refresh failed, serving stale data for ${key}`, err);
+        return copy(latest.data);
+      }
     },
   };
 }

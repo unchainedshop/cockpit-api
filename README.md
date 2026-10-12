@@ -132,11 +132,11 @@ Reads go through a per-client **stale-while-revalidate** cache (built-in in-memo
 |---|---|
 | Fresh (default 1 h) | Served from cache |
 | Stale (default up to 30 days) | Served from cache; one deduplicated background refresh per key |
-| Cold or past the stale window | Waits for Cockpit (concurrent callers share one request); errors are thrown |
+| Cold or past the stale window | Waits for Cockpit (concurrent callers share one request) |
 
-When a background refresh fails:
+All windows count from the fetch. When a refresh fails:
 
-- **Transient** (network error, timeout, 5xx, 429, other 4xx): the stale entry keeps being served until its stale window ends. Data is never served past the stale window.
+- **Transient** (network error, timeout, 5xx, 429, other 4xx): the cached data keeps being served until its stale-if-error window ends (`staleIfErrorMs`, default: the stale window). Past it, or on a cold cache, the error is thrown.
 - **401 / 403**: the entry is expired, so data fetched with revoked credentials is not served again.
 - **404**: never cached; a previously cached entry is expired, so deleted content disappears.
 
@@ -148,6 +148,11 @@ await CockpitAPI({
     max: 500,                                        // built-in LRU entries (COCKPIT_CACHE_MAX)
     swr: { freshMs: 5 * 60_000, staleMs: 86_400_000 },
   },
+});
+// Refresh after 10 s, wait for Cockpit after a minute, but serve
+// up to a week old data while Cockpit fails
+await CockpitAPI({
+  cache: { swr: { freshMs: 10_000, staleMs: 60_000, staleIfErrorMs: 7 * 86_400_000 } },
 });
 await CockpitAPI({ cache: false });                  // every call fetches
 ```
@@ -192,7 +197,7 @@ const store: AsyncCacheStore = {
     return value ? JSON.parse(value) : undefined;
   },
   async set(key, value) {
-    // Keep the TTL at least as long as the stale window
+    // Keep the TTL at least as long as the stale(-if-error) window
     await redis.set(key, JSON.stringify(value), { EX: 30 * 24 * 60 * 60 });
   },
   async clear(pattern) {
@@ -205,7 +210,7 @@ const store: AsyncCacheStore = {
 const client = await CockpitAPI({ cache: { store } });
 ```
 
-- Values are SWR envelopes `{ data, freshUntil, staleUntil }` (`data: null` marks an expired entry); external stores must serialize them.
+- Values are SWR envelopes `{ data, freshUntil, staleUntil }`, plus `errorUntil` when `staleIfErrorMs` extends the stale window (`data: null` marks an expired entry); external stores must serialize them.
 - **Copy semantics:** the client stores a `structuredClone` of every value and hands every caller its own copy, so mutating a result never affects the cache or other callers. Stores may therefore keep and return shared references.
 - `createLRUCacheStore({ max })` creates the built-in store, e.g. to share one bounded in-memory store between several clients (their keys are prefixed per endpoint, tenant and access scope).
 
@@ -428,7 +433,7 @@ New: `CockpitHttpError`, `createLRUCacheStore`, `clearRouteCache()`, the `timeou
 
 ### Caching
 
-- **Bounded staleness:** data past its stale window (default 30 days) is no longer served when Cockpit fails; the error is thrown.
+- **Bounded staleness:** data past its stale window (default 30 days) is no longer served when Cockpit fails; the error is thrown. Since 3.1, `cache.swr.staleIfErrorMs` keeps serving it for longer when a refresh fails.
 - **401/403** during a refresh expire the entry; **404** expires a cached entry (deleted content disappears).
 - **New key format** `<api path>|<access scope>|<hash>` under a prefix that includes the client's access scope. Old patterns such as `clearCache("content:posts")` or `clearCache("pages:")` no longer match anything:
 

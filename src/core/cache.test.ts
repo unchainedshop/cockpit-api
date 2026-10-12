@@ -413,6 +413,135 @@ describe("cache.swr", () => {
     }
   });
 
+  describe("stale-if-error window", () => {
+    const swr = { freshMs: 1000, staleMs: 5000, staleIfErrorMs: 60_000 };
+    const httpError = (status: number) => new CockpitHttpError(status, new URL("https://cms.example.com/api/x"));
+    const failing = (err: unknown) => async () => {
+      throw err;
+    };
+    /** Caches `{ v: "old" }` at T0, then moves past the stale window */
+    const setup = async (t: TestContext, store?: AsyncCacheStore) => {
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      const warn = t.mock.method(logger, "warn", () => {});
+      const cache = createCacheManager("sie:", store ? { swr, store } : { swr });
+      await cache.swr("k", async () => ({ v: "old" }));
+      t.mock.timers.tick(5000);
+      return { cache, warn };
+    };
+
+    it("records errorUntil only when it extends the stale window", async (t) => {
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      const extended = createCacheManager("a:", { swr });
+      await extended.swr("k", async () => ({ v: 1 }));
+      assert.deepStrictEqual(await extended.get("k"), {
+        data: { v: 1 },
+        freshUntil: T0 + 1000,
+        staleUntil: T0 + 5000,
+        errorUntil: T0 + 60_000,
+      });
+      const within = createCacheManager("b:", { swr: { ...swr, staleIfErrorMs: 2000 } });
+      await within.swr("k", async () => ({ v: 1 }));
+      assert.deepStrictEqual(await within.get("k"), { data: { v: 1 }, freshUntil: T0 + 1000, staleUntil: T0 + 5000 });
+    });
+
+    it("waits for the refresh past the stale window when upstream answers", async (t) => {
+      const { cache } = await setup(t);
+      assert.deepStrictEqual(await cache.swr("k", async () => ({ v: "new" })), { v: "new" });
+    });
+
+    const transient: [string, unknown][] = [
+      ["a network error", new Error("fetch failed")],
+      ["a timeout", new Error("Cockpit: request timed out after 15000ms")],
+      ["400", httpError(400)],
+      ["429", httpError(429)],
+      ["500", httpError(500)],
+      ["503", httpError(503)],
+    ];
+    for (const [label, err] of transient) {
+      it(`serves the expired data when the refresh fails with ${label}`, async (t) => {
+        const { cache, warn } = await setup(t);
+        assert.deepStrictEqual(await cache.swr("k", failing(err)), { v: "old" });
+        assert.match(String(warn.mock.calls[0]?.arguments[0]), /serving stale data for k/);
+        assert.deepStrictEqual(await cache.swr("k", async () => ({ v: "new" })), { v: "new" }, "retries next time");
+      });
+    }
+
+    it("throws once the stale-if-error window has passed", async (t) => {
+      const { cache } = await setup(t);
+      t.mock.timers.tick(55_000);
+      await assert.rejects(() => cache.swr("k", failing(new Error("upstream down"))), { message: "upstream down" });
+    });
+
+    for (const status of [401, 403]) {
+      it(`never serves data on ${String(status)}, and expires it`, async (t) => {
+        const { cache } = await setup(t);
+        await assert.rejects(() => cache.swr("k", failing(httpError(status))), { status });
+        await assert.rejects(() => cache.swr("k", failing(new Error("upstream down"))), { message: "upstream down" });
+      });
+    }
+
+    it("does not serve data deleted upstream (404 tombstone)", async (t) => {
+      const { cache } = await setup(t);
+      assert.strictEqual(await cache.swr("k", async () => null), null);
+      await assert.rejects(() => cache.swr("k", failing(new Error("upstream down"))), { message: "upstream down" });
+    });
+
+    it("does not serve data cleared while the refresh was pending", async (t) => {
+      const { cache } = await setup(t);
+      const { state, fetcher } = deferredFetcher<{ v: string }>();
+      const pending = cache.swr("k", fetcher);
+      await flush();
+      await cache.clear();
+      state.reject(new Error("upstream down"));
+      await assert.rejects(pending, { message: "upstream down" });
+    });
+
+    it("hands every caller joining the failed refresh its own copy", async (t) => {
+      type Doc = { items: string[] };
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      t.mock.method(logger, "warn", () => {});
+      const cache = createCacheManager("sie:", { swr });
+      await cache.swr<Doc>("k", async () => ({ items: ["old"] }));
+      t.mock.timers.tick(5000);
+      const { state, fetcher } = deferredFetcher<Doc>();
+      const a = cache.swr<Doc>("k", fetcher);
+      const b = cache.swr<Doc>("k", fetcher);
+      await flush();
+      assert.strictEqual(state.calls, 1, "callers share one refresh");
+      state.reject(new Error("upstream down"));
+      const [ra, rb] = (await Promise.all([a, b])) as [Doc, Doc];
+      assert.deepStrictEqual([ra, rb], [{ items: ["old"] }, { items: ["old"] }]);
+      ra.items.push("mutated");
+      assert.deepStrictEqual(rb, { items: ["old"] });
+      assert.deepStrictEqual(await cache.get("k"), {
+        data: { items: ["old"] },
+        freshUntil: T0 + 1000,
+        staleUntil: T0 + 5000,
+        errorUntil: T0 + 60_000,
+      });
+    });
+
+    it("ends at staleUntil for entries without errorUntil (written by 3.0)", async (t) => {
+      t.mock.timers.enable({ apis: ["Date"], now: T0 });
+      const cache = createCacheManager("sie:", { swr });
+      await cache.set("k", { data: { v: "old" }, freshUntil: T0 - 2000, staleUntil: T0 - 1000 });
+      await assert.rejects(() => cache.swr("k", failing(new Error("upstream down"))), { message: "upstream down" });
+    });
+
+    it("still throws on a cold cache", async (t) => {
+      const { cache } = await setup(t);
+      await assert.rejects(() => cache.swr("other", failing(new Error("upstream down"))), {
+        message: "upstream down",
+      });
+    });
+
+    it("works with a custom store", async (t) => {
+      const { store } = createMapStore();
+      const { cache } = await setup(t, store);
+      assert.deepStrictEqual(await cache.swr("k", failing(httpError(502))), { v: "old" });
+    });
+  });
+
   it("serves stale data when the revalidating request times out", async (t) => {
     const originalFetch = globalThis.fetch;
     t.after(() => {
